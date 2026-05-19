@@ -567,6 +567,171 @@ export async function sshSetEnvValue(
   await sshWriteFile(config, envPath, lines.join("\n"));
 }
 
+// ─── Dotted-path YAML helpers (mirror of the local-mode fix) ───────────────
+//
+// The previous implementation used `^\s*<key>:` against the whole remote
+// config.yaml. Two problems, both observed in the wild (#240): dotted-path
+// keys like `model.provider` looked for a literal `model.provider:` line
+// that doesn't exist in real YAML, and flat keys leaked across blocks
+// (the first `default:` at any indent — typically `personalities.default`
+// — would shadow `model.default`). The new helpers walk path segments at
+// strictly-greater indent than each parent and pin single-segment keys
+// to column 0.
+//
+// Duplicates the navigator in config.ts intentionally to keep this PR
+// self-contained and independent. Once both land, a small consolidation
+// PR can lift these into a shared module.
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripYamlQuotes(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
+interface YamlPathHit {
+  value: string;
+  valueStart: number;
+  valueEnd: number;
+}
+
+interface SegmentMatch {
+  indent: number;
+  rawValue: string;
+  valueStart: number;
+  valueEnd: number;
+  afterLine: number;
+}
+
+function findSegmentInBlock(
+  content: string,
+  startAt: number,
+  parentIndent: number,
+  segment: string,
+): SegmentMatch | null {
+  const escapedSegment = escapeRegex(segment);
+  let directChildIndent: number | null = null;
+  let cursor = startAt;
+
+  while (cursor < content.length) {
+    const lineEnd = content.indexOf("\n", cursor);
+    const lineEndExclusive = lineEnd === -1 ? content.length : lineEnd;
+    const line = content.slice(cursor, lineEndExclusive);
+    const trimmed = line.trim();
+
+    if (trimmed === "" || trimmed.startsWith("#")) {
+      cursor =
+        lineEndExclusive === content.length ? content.length : lineEndExclusive + 1;
+      continue;
+    }
+
+    const indent = line.length - line.trimStart().length;
+    // Block boundary: a non-blank line at or shallower than the parent
+    // closes the parent's block.
+    if (indent <= parentIndent) return null;
+
+    if (directChildIndent === null) directChildIndent = indent;
+
+    if (indent === directChildIndent) {
+      // `[ \t]*` so this also matches top-level keys at column 0 (the
+      // first segment of a dotted path); the `indent === directChild`
+      // gate above already enforces depth.
+      const m = line.match(
+        new RegExp(
+          `^([ \\t]*)(${escapedSegment}):([ \\t]*)([^\\n#]*?)([ \\t]*)(#.*)?$`,
+        ),
+      );
+      if (m) {
+        const indentStr = m[1];
+        const gapBeforeValue = m[3];
+        const rawValue = m[4];
+        const keyEnd = cursor + indentStr.length + segment.length + 1;
+        const valueStart = keyEnd + gapBeforeValue.length;
+        const valueEnd = valueStart + rawValue.length;
+        return {
+          indent: indentStr.length,
+          rawValue,
+          valueStart,
+          valueEnd,
+          afterLine:
+            lineEndExclusive === content.length
+              ? content.length
+              : lineEndExclusive + 1,
+        };
+      }
+    }
+
+    cursor =
+      lineEndExclusive === content.length ? content.length : lineEndExclusive + 1;
+  }
+
+  return null;
+}
+
+/** Exported for unit testing. Walks a dotted YAML path through `content`. */
+export function findYamlPath(content: string, dottedPath: string): YamlPathHit | null {
+  const segments = dottedPath.split(".").filter(Boolean);
+  if (segments.length === 0) return null;
+
+  let cursor = 0;
+  let parentIndent = -1;
+
+  for (let i = 0; i < segments.length; i++) {
+    const isLast = i === segments.length - 1;
+    const found = findSegmentInBlock(content, cursor, parentIndent, segments[i]);
+    if (!found) return null;
+
+    if (isLast) {
+      return {
+        value: stripYamlQuotes(found.rawValue),
+        valueStart: found.valueStart,
+        valueEnd: found.valueEnd,
+      };
+    }
+    cursor = found.afterLine;
+    parentIndent = found.indent;
+  }
+
+  return null;
+}
+
+/** Exported for unit testing. Matches `<key>:` at column 0 only. */
+export function findTopLevelKey(content: string, key: string): YamlPathHit | null {
+  const re = new RegExp(
+    `^(${escapeRegex(key)}):([ \\t]*)([^\\n#]*?)([ \\t]*)(#.*)?$`,
+    "m",
+  );
+  const m = content.match(re);
+  if (!m || m.index === undefined) return null;
+  const gap = m[2];
+  const rawValue = m[3];
+  const lineStart = m.index;
+  const valueStart = lineStart + key.length + 1 + gap.length;
+  const valueEnd = valueStart + rawValue.length;
+  return {
+    value: stripYamlQuotes(rawValue),
+    valueStart,
+    valueEnd,
+  };
+}
+
+function locateInYaml(content: string, key: string): YamlPathHit | null {
+  const segments = key.split(".").filter(Boolean);
+  if (segments.length === 0) return null;
+  return segments.length === 1
+    ? findTopLevelKey(content, segments[0])
+    : findYamlPath(content, key);
+}
+
 export async function sshGetConfigValue(
   config: SshConfig,
   key: string,
@@ -574,9 +739,8 @@ export async function sshGetConfigValue(
 ): Promise<string | null> {
   const content = await sshReadFile(config, remoteConfigPath(profile));
   if (!content) return null;
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = content.match(new RegExp(`^\\s*${escapedKey}:\\s*["']?([^"'\\n#]+)["']?`, "m"));
-  return match ? match[1].trim() : null;
+  const hit = locateInYaml(content, key);
+  return hit ? hit.value : null;
 }
 
 export async function sshSetConfigValue(
@@ -591,9 +755,24 @@ export async function sshSetConfigValue(
   const configPath = remoteConfigPath(profile);
   const content = await sshReadFile(config, configPath);
   if (!content) return;
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`^(\\s*#?\\s*${escapedKey}:\\s*)["']?[^"'\\n#]*["']?`, "m");
-  const updated = regex.test(content) ? content.replace(regex, `$1"${value}"`) : content;
+
+  const hit = locateInYaml(content, key);
+  let updated: string;
+  if (hit) {
+    updated =
+      content.slice(0, hit.valueStart) +
+      `"${value}"` +
+      content.slice(hit.valueEnd);
+  } else if (!key.includes(".")) {
+    // Flat key missing → append at top level.
+    const sep = content.endsWith("\n") || content === "" ? "" : "\n";
+    updated = `${content}${sep}${key}: "${value}"\n`;
+  } else {
+    // Missing nested path — don't guess where to materialize a parent
+    // block; that risks corrupting the file. Leave the content alone.
+    return;
+  }
+
   await sshWriteFile(config, configPath, updated);
 }
 
@@ -606,10 +785,17 @@ export async function sshGetModelConfig(
   config: SshConfig,
   profile?: string,
 ): Promise<{ provider: string; model: string; baseUrl: string }> {
+  // Use dotted paths so the lookup is scoped to the `model:` block. The
+  // previous flat keys `provider` / `default` / `base_url` would each
+  // match the first occurrence at any indent — typically picking up
+  // `personalities.default` or `auxiliary.vision.provider` and reporting
+  // them as the model fields (#240).
   return {
-    provider: (await sshGetConfigValue(config, "provider", profile)) || "auto",
-    model: (await sshGetConfigValue(config, "default", profile)) || "",
-    baseUrl: (await sshGetConfigValue(config, "base_url", profile)) || "",
+    provider:
+      (await sshGetConfigValue(config, "model.provider", profile)) || "auto",
+    model: (await sshGetConfigValue(config, "model.default", profile)) || "",
+    baseUrl:
+      (await sshGetConfigValue(config, "model.base_url", profile)) || "",
   };
 }
 
@@ -620,9 +806,11 @@ export async function sshSetModelConfig(
   baseUrl: string,
   profile?: string,
 ): Promise<void> {
-  await sshSetConfigValue(config, "provider", provider, profile);
-  await sshSetConfigValue(config, "default", model, profile);
-  await sshSetConfigValue(config, "base_url", baseUrl, profile);
+  await sshSetConfigValue(config, "model.provider", provider, profile);
+  await sshSetConfigValue(config, "model.default", model, profile);
+  if (baseUrl) {
+    await sshSetConfigValue(config, "model.base_url", baseUrl, profile);
+  }
   const configPath = remoteConfigPath(profile);
   const content = await sshReadFile(config, configPath);
   if (!content) return;
