@@ -12,6 +12,12 @@ export default {
     light: "Light",
     dark: "Dark",
   },
+  font: {
+    label: "Font",
+    manrope: "Manrope",
+    system: "System",
+    hint: "Choose the interface font",
+  },
   language: {
     label: "Language",
     english: "English",

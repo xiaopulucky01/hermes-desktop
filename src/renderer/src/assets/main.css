@@ -73,45 +73,31 @@
   --selection: rgba(0, 63, 122, 0.2);
 }
 
-/* ----- Google Sans ----- */
+/* ----- Manrope ----- */
 @font-face {
-  font-family: "Google Sans";
-  src: url("./fonts/GoogleSans-Regular.ttf") format("truetype");
+  font-family: "Manrope";
+  src: url("./fonts/Manrope-Regular.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: "Google Sans";
-  src: url("./fonts/GoogleSans-Italic.ttf") format("truetype");
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Google Sans";
-  src: url("./fonts/GoogleSans-Medium.ttf") format("truetype");
+  font-family: "Manrope";
+  src: url("./fonts/Manrope-Medium.ttf") format("truetype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: "Google Sans";
-  src: url("./fonts/GoogleSans-MediumItalic.ttf") format("truetype");
-  font-weight: 500;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Google Sans";
-  src: url("./fonts/GoogleSans-SemiBold.ttf") format("truetype");
+  font-family: "Manrope";
+  src: url("./fonts/Manrope-SemiBold.ttf") format("truetype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: "Google Sans";
-  src: url("./fonts/GoogleSans-Bold.ttf") format("truetype");
+  font-family: "Manrope";
+  src: url("./fonts/Manrope-Bold.ttf") format("truetype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -125,7 +111,7 @@
   --radius-xl: 20px;
   --transition: 150ms ease;
   --font-sans:
-    "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     sans-serif;
   --font-mono:
     "SF Mono", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace;

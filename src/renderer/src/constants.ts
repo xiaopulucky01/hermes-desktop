@@ -324,6 +324,36 @@ export const THEME_OPTIONS = [
 
 export const THEME_STORAGE_KEY = "hermes-theme";
 
+// ── Font ────────────────────────────────────────────────
+
+// Each option maps to a full font-family stack assigned to `--font-sans`.
+// "manrope" is the bundled default; the rest fall back to OS-installed
+// families with a sane sans-serif chain so something always renders.
+export interface FontOption {
+  value: string;
+  label: string;
+  stack: string;
+}
+
+export const FONT_OPTIONS: FontOption[] = [
+  {
+    value: "manrope",
+    label: "settings.font.manrope",
+    stack:
+      '"Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  },
+  {
+    value: "system",
+    label: "settings.font.system",
+    stack:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, Cantarell, "Helvetica Neue", sans-serif',
+  },
+];
+
+export const DEFAULT_FONT = "manrope";
+
+export const FONT_STORAGE_KEY = "hermes-font";
+
 // ── Settings API Key Sections ───────────────────────────
 
 export const SETTINGS_SECTIONS: SectionDef[] = [
