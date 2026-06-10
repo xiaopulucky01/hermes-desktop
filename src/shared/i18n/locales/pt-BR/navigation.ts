@@ -3,7 +3,6 @@ export default {
   sessions: "Sessões",
   agents: "Perfis",
   office: "Escritório",
-  bank: "Banco",
   models: "Modelos",
   providers: "Provedores",
   skills: "Habilidades",

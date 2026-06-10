@@ -4,7 +4,6 @@ export default {
   discover: "Discover",
   agents: "Profiles",
   office: "Office",
-  bank: "Bank",
   models: "Models",
   providers: "Providers",
   skills: "Skills",

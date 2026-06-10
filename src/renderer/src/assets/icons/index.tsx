@@ -14,7 +14,6 @@ export {
   Workflow,
   ExternalLink,
   KeyRound,
-  Landmark,
   Layers,
   Monitor,
   Moon,

@@ -51,13 +51,10 @@ export default defineConfig(
     },
   },
   {
-    // The 3D office / bank (react-three-fiber) uses Three.js intrinsic elements
-    // whose props (position, args, rotation, intensity, ...) are flagged by the
+    // The 3D office (react-three-fiber) uses Three.js intrinsic elements whose
+    // props (position, args, rotation, intensity, ...) are flagged by the
     // DOM-oriented `react/no-unknown-property` rule. Disable it here only.
-    files: [
-      "src/renderer/src/screens/Office/office3d/**/*.{ts,tsx}",
-      "src/renderer/src/screens/Bank/bank3d/**/*.{ts,tsx}",
-    ],
+    files: ["src/renderer/src/screens/Office/office3d/**/*.{ts,tsx}"],
     rules: {
       "react/no-unknown-property": "off",
       // Ported 3D art modules use many small internal helpers without explicit

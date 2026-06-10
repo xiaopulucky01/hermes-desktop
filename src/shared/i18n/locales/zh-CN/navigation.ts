@@ -3,7 +3,6 @@ export default {
   sessions: "会话",
   agents: "档案",
   office: "工作区",
-  bank: "银行",
   models: "模型",
   providers: "提供商",
   skills: "技能",
