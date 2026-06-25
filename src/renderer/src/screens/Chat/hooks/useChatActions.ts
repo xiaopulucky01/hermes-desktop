@@ -263,7 +263,12 @@ export function useChatActions({
         if (showPending) {
           setMessages((prev) => [
             ...prev,
-            { id: pendingId, role: "agent", content: `⏳ Running ${text}…` },
+            {
+              id: pendingId,
+              role: "agent",
+              isSlashLoader: true,
+              content: `Running ${text}…`,
+            },
           ]);
         }
         const replacePending = (content: string): void =>

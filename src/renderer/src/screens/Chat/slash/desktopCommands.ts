@@ -48,12 +48,56 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommandDefinition[] = [
       output: context.renderSlashHelp(),
     }),
   },
+  {
+    name: "model",
+    description: "Open model picker",
+    category: "Desktop",
+    source: "desktop",
+    target: "desktop",
+    allowWhileBusy: true,
+    execute: async () => {
+      window.dispatchEvent(new CustomEvent("model-picker:open"));
+      return { type: "handled" };
+    },
+  },
+  ...(
+    [
+      ["agents", "Open Agents page"],
+      ["office", "Open Office 3D page"],
+      ["discover", "Open Discover page"],
+      ["providers", "Open Providers page"],
+      ["schedules", "Open Schedules page"],
+      ["kanban", "Open Kanban board"],
+      ["gateway", "Open Gateway status page"],
+    ] as const
+  ).map(
+    ([name, description]): SlashCommandDefinition => ({
+      name,
+      description,
+      category: "Navigation",
+      source: "desktop",
+      target: "desktop",
+      allowWhileBusy: true,
+      execute: async () => {
+        window.dispatchEvent(
+          new CustomEvent("navigation:goto", { detail: name }),
+        );
+        return { type: "handled" };
+      },
+    }),
+  ),
 ];
 
 const LOCAL_COMMANDS = [
   ["new", "Start a new chat"],
   ["clear", "Clear conversation history"],
   ["persona", "Show the current persona"],
+  ["memory", "Show agent memory"],
+  ["tools", "Show available toolsets"],
+  ["skills", "Show installed skills"],
+  ["version", "Show Hermes version"],
+  ["fast", "Toggle fast mode"],
+  ["usage", "Show token usage"],
 ] as const;
 
 export const LOCAL_DESKTOP_SLASH_COMMANDS: SlashCommandDefinition[] =

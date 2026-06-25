@@ -1,4 +1,5 @@
 import React from "react";
+import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   Archive,
@@ -7,6 +8,8 @@ import {
   Bot,
   Brain,
   Bug,
+  Building2,
+  Calendar,
   CheckCircle2,
   Code2,
   Coins,
@@ -25,9 +28,11 @@ import {
   MessageSquarePlus,
   Mic,
   Minimize2,
+  Radio,
   RefreshCw,
   RotateCcw,
   RotateCw,
+  Server,
   Share2,
   Sparkles,
   Target,
@@ -35,6 +40,7 @@ import {
   Undo2,
   User,
   UserCheck,
+  Users,
   Video,
   Wrench,
   XCircle,
@@ -54,7 +60,7 @@ export function registerCustomSlashSvg(
   CUSTOM_SLASH_SVGS[clean] = svg;
 }
 
-const ICON_MAP: Record<string, any> = {
+const ICON_MAP: Record<string, LucideIcon> = {
   // Chat control
   new: MessageSquarePlus,
   clear: Eraser,
@@ -93,8 +99,14 @@ const ICON_MAP: Record<string, any> = {
   skills: Sparkles,
   "reload-skills": RefreshCw,
   kanban: Columns,
+  schedules: Calendar,
   curator: Award,
   model: Bot,
+  agents: Users,
+  office: Building2,
+  discover: Compass,
+  providers: Server,
+  gateway: Radio,
   memory: Brain,
   persona: UserCheck,
   version: Info,
@@ -109,7 +121,7 @@ const ICON_MAP: Record<string, any> = {
   yuanbao: Bot,
 };
 
-const CATEGORY_DEFAULTS: Record<string, any> = {
+const CATEGORY_DEFAULTS: Record<string, LucideIcon> = {
   chat: MessageSquarePlus,
   agent: Bot,
   tools: Wrench,
@@ -148,7 +160,7 @@ export function SlashCommandIcon({
   }
 
   // 2. Exact Lucide map
-  const IconComponent: any =
+  const IconComponent: LucideIcon =
     ICON_MAP[cleanName] ??
     (category ? CATEGORY_DEFAULTS[category.toLowerCase()] : undefined) ??
     Sparkles;

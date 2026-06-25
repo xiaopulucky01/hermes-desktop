@@ -52,6 +52,7 @@ const groups: ModelGroup[] = [
 /** Render helper that also returns the container for scoped DOM queries. */
 function renderPicker(
   overrides: {
+    active?: boolean;
     currentModel?: string;
     currentProvider?: string;
     currentBaseUrl?: string;
@@ -65,6 +66,7 @@ function renderPicker(
   const onSelectModel = vi.fn();
   const utils = render(
     <ModelPicker
+      active={overrides.active}
       currentModel={overrides.currentModel ?? "owl-alpha"}
       currentProvider={overrides.currentProvider ?? "openrouter"}
       currentBaseUrl={overrides.currentBaseUrl ?? ""}
@@ -125,6 +127,22 @@ describe("ModelPicker", () => {
     openPicker(container);
     fireEvent.mouseDown(document.body);
     expect(container.querySelector(".chat-model-dropdown")).toBeNull();
+  });
+
+  it("opens from a slash-command event only when the chat is active", () => {
+    const active = renderPicker({ active: true });
+    const inactive = renderPicker({ active: false });
+
+    window.dispatchEvent(new CustomEvent("model-picker:open"));
+
+    expect(
+      active.container.querySelector(".chat-model-dropdown"),
+    ).not.toBeNull();
+    expect(
+      inactive.container.querySelector(".chat-model-dropdown"),
+    ).toBeNull();
+    expect(active.onOpen).toHaveBeenCalledTimes(1);
+    expect(inactive.onOpen).not.toHaveBeenCalled();
   });
 
   // ── model list rendering ────────────────────────────────────────

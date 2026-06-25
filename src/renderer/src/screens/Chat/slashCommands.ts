@@ -129,7 +129,37 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "/model",
-    description: "Show or switch the current model",
+    description: "Open model picker",
+    category: "info",
+  },
+  {
+    name: "/agents",
+    description: "Open Agents page",
+    category: "info",
+  },
+  {
+    name: "/office",
+    description: "Open Office 3D page",
+    category: "info",
+  },
+  {
+    name: "/discover",
+    description: "Open Discover page",
+    category: "info",
+  },
+  {
+    name: "/providers",
+    description: "Open Providers page",
+    category: "info",
+  },
+  {
+    name: "/schedules",
+    description: "Open Schedules page",
+    category: "info",
+  },
+  {
+    name: "/gateway",
+    description: "Open Gateway status page",
     category: "info",
   },
   { name: "/memory", description: "Show agent memory", category: "info" },

@@ -68,7 +68,7 @@ The command palette and executor share a catalog built by [[src/renderer/src/scr
 
 ### Desktop commands
 
-Desktop commands in [[src/renderer/src/screens/Chat/slash/desktopCommands.ts#DESKTOP_SLASH_COMMANDS]] handle local Electron/renderer UI operations such as opening settings.
+Desktop commands in [[src/renderer/src/screens/Chat/slash/desktopCommands.ts#DESKTOP_SLASH_COMMANDS]] handle local Electron/renderer UI operations such as opening settings, triggering the active chat's model picker, and switching navigation views without sending prompts.
 
 ### Agent commands
 
@@ -81,4 +81,3 @@ Model commands and Agent `send`/skill directives pass through [[src/renderer/src
 ### Command icons
 
 Visual presentation in the autocomplete popup is handled by [[src/renderer/src/screens/Chat/slash/SlashCommandIcon.tsx#SlashCommandIcon]], mapping command names to Lucide icons with fallback defaults and a custom SVG registry.
-

@@ -285,6 +285,16 @@ function Layout({
     setView(v);
   }, []);
 
+  useEffect(() => {
+    const handleNavigation = (e: Event): void => {
+      const targetView = (e as CustomEvent<View>).detail;
+      if (targetView) goTo(targetView);
+    };
+    window.addEventListener("navigation:goto", handleNavigation);
+    return () =>
+      window.removeEventListener("navigation:goto", handleNavigation);
+  }, [goTo]);
+
   const focusDiscover = useCallback(
     (kind: "skills" | "mcps") => {
       setDiscoverFocus((prev) => ({ kind, nonce: (prev?.nonce ?? 0) + 1 }));

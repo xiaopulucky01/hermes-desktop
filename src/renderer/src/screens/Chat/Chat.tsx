@@ -1015,6 +1015,7 @@ function Chat({
           toolbarExtras={
             <>
               <ModelPicker
+                active={active}
                 currentModel={chatCurrentModel}
                 currentProvider={chatCurrentProvider}
                 currentBaseUrl={chatCurrentBaseUrl}

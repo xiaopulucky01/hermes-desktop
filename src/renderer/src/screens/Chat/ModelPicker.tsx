@@ -4,6 +4,7 @@ import { useI18n } from "../../components/useI18n";
 import type { ModelGroup } from "./types";
 
 interface ModelPickerProps {
+  active?: boolean;
   currentModel: string;
   currentProvider: string;
   currentBaseUrl: string;
@@ -14,6 +15,7 @@ interface ModelPickerProps {
 }
 
 export const ModelPicker = memo(function ModelPicker({
+  active = true,
   currentModel,
   currentProvider,
   currentBaseUrl,
@@ -40,6 +42,23 @@ export const ModelPicker = memo(function ModelPicker({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
+
+  const onOpenRef = useRef(onOpen);
+  useEffect(() => {
+    onOpenRef.current = onOpen;
+  });
+
+  useEffect(() => {
+    if (!active) return;
+    function handleExternalOpen(): void {
+      onOpenRef.current();
+      setIsOpen(true);
+      setSearchInput("");
+    }
+    window.addEventListener("model-picker:open", handleExternalOpen);
+    return () =>
+      window.removeEventListener("model-picker:open", handleExternalOpen);
+  }, [active]);
 
   const searchQuery = searchInput.trim().toLowerCase();
   const filteredGroups = searchQuery

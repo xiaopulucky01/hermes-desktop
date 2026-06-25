@@ -59,17 +59,6 @@ export function useLocalCommands({
           onClear();
           return true;
 
-        case "/model": {
-          const mc = await window.hermesAPI.getModelConfig(profile);
-          const display = mc.model || "Not set";
-          const prov = mc.provider || "auto";
-          addAgentMessage(
-            `**Current model:** \`${display}\`\n**Provider:** ${prov}` +
-              (mc.baseUrl ? `\n**Base URL:** ${mc.baseUrl}` : ""),
-          );
-          return true;
-        }
-
         case "/memory": {
           const mem = await window.hermesAPI.readMemory(profile);
           const lines: string[] = ["**Agent Memory**\n"];
