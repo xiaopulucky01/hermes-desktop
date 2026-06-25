@@ -310,7 +310,7 @@ export const MessageRow = memo(function MessageRow({
           msg.error ? " chat-bubble-error" : ""
         }`}
       >
-        {msg.content && !isLoading && (
+        {msg.content && !isLoading && !msg.isSlashLoader && (
           <div className="chat-bubble-actions">
             <button
               type="button"

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi, type Mock } from "vitest";
 
 vi.mock("../../components/useI18n", () => ({
@@ -133,14 +133,14 @@ describe("ModelPicker", () => {
     const active = renderPicker({ active: true });
     const inactive = renderPicker({ active: false });
 
-    window.dispatchEvent(new CustomEvent("model-picker:open"));
+    act(() => {
+      window.dispatchEvent(new CustomEvent("model-picker:open"));
+    });
 
     expect(
       active.container.querySelector(".chat-model-dropdown"),
     ).not.toBeNull();
-    expect(
-      inactive.container.querySelector(".chat-model-dropdown"),
-    ).toBeNull();
+    expect(inactive.container.querySelector(".chat-model-dropdown")).toBeNull();
     expect(active.onOpen).toHaveBeenCalledTimes(1);
     expect(inactive.onOpen).not.toHaveBeenCalled();
   });

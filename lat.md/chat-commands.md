@@ -70,6 +70,8 @@ The command palette and executor share a catalog built by [[src/renderer/src/scr
 
 Desktop commands in [[src/renderer/src/screens/Chat/slash/desktopCommands.ts#DESKTOP_SLASH_COMMANDS]] handle local Electron/renderer UI operations such as opening settings, triggering the active chat's model picker, and switching navigation views without sending prompts.
 
+Asynchronous Agent commands render a temporary slash-loader bubble without transcript actions such as Copy; the bubble is replaced by the command output or error when execution finishes.
+
 ### Agent commands
 
 Agent commands forward upstream via [[src/renderer/src/screens/Chat/slash/executeAgentCommand.ts#executeAgentCommand]] using gateway JSON-RPC.
