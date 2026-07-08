@@ -6990,19 +6990,78 @@ body {
   margin: 0 0 12px;
 }
 
-.hermes-account-summary {
+/* Signed-in identity card: avatar · name/email/status · sign-out. */
+.hermes-account-card {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
 }
 
-.hermes-account-identity {
-  display: flex;
+.hermes-account-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border-bright);
+}
+
+.hermes-account-avatar-letter {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent-hover), var(--accent));
+}
+
+.hermes-account-who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  /* Push the sign-out button to the card's right edge. */
+  margin-right: auto;
+}
+
+.hermes-account-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-account-email {
+  font-size: 12px;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-account-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--success);
+}
+
+.hermes-account-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-bg);
 }
 
 /* Sign-in modal — device-login (RFC 8628) with a loader spinning around the
@@ -8373,6 +8432,21 @@ body {
   font-size: 13px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+.agents-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agents-sync-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agents-create-clone {

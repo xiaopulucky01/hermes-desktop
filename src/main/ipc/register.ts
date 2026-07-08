@@ -92,6 +92,7 @@ import {
   detectDeviceCode,
 } from "../hermes-auth";
 import { startDeviceLogin, cancelDeviceLogin } from "../hermes-account";
+import { syncAgents, getAgentSyncStatus } from "../agent-sync";
 import { getAccount, clearAccount } from "../account-store";
 import {
   isRemoteMode,
@@ -819,6 +820,18 @@ export function registerIpcHandlers(context: IpcContext): void {
     clearAccount(profile);
     return { success: true };
   });
+
+  // Cloud agent sync — reconciles local profiles with the signed-in Hermes One
+  // account's cloud agents. `agent-sync-updated` tells the renderer to reload
+  // its profile list (pull-created profiles appear without a manual refresh).
+  ipcMain.handle("agent-sync-run", async (event) => {
+    const result = await syncAgents();
+    if (!event.sender.isDestroyed()) {
+      event.sender.send("agent-sync-updated", result);
+    }
+    return result;
+  });
+  ipcMain.handle("agent-sync-status", () => getAgentSyncStatus());
 
   // Configuration (profile-aware)
   ipcMain.handle("get-locale", () => getAppLocale());

@@ -21,6 +21,7 @@ import type {
   HermesAccount,
   HermesAccountUser,
 } from "../shared/account";
+import type { AgentSyncResult, AgentSyncStatus } from "../shared/agent-sync";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
 
 /**
@@ -182,11 +183,14 @@ const hermesAPI = {
     ipcRenderer.invoke("hermes-account-login", profile),
   cancelAccountLogin: (): Promise<boolean> =>
     ipcRenderer.invoke("hermes-account-login-cancel"),
-  onAccountLoginCode: (callback: (info: DeviceCodeInfo) => void): (() => void) => {
+  onAccountLoginCode: (
+    callback: (info: DeviceCodeInfo) => void,
+  ): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, info: unknown): void =>
       callback(info as DeviceCodeInfo);
     ipcRenderer.on("hermes-account-login-code", handler);
-    return () => ipcRenderer.removeListener("hermes-account-login-code", handler);
+    return () =>
+      ipcRenderer.removeListener("hermes-account-login-code", handler);
   },
   onAccountLoginProgress: (callback: (chunk: string) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, chunk: unknown): void =>
@@ -199,6 +203,22 @@ const hermesAPI = {
     ipcRenderer.invoke("hermes-account-get", profile),
   accountLogout: (profile?: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke("hermes-account-logout", profile),
+
+  // Cloud agent sync (profiles ↔ signed-in Hermes One account)
+  syncAgents: (): Promise<AgentSyncResult> =>
+    ipcRenderer.invoke("agent-sync-run"),
+  getAgentSyncStatus: (): Promise<AgentSyncStatus> =>
+    ipcRenderer.invoke("agent-sync-status"),
+  onAgentSyncUpdated: (
+    callback: (result: AgentSyncResult) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      result: unknown,
+    ): void => callback(result as AgentSyncResult);
+    ipcRenderer.on("agent-sync-updated", handler);
+    return () => ipcRenderer.removeListener("agent-sync-updated", handler);
+  },
 
   getLocale: (): Promise<AppLocale> => ipcRenderer.invoke("get-locale"),
   setLocale: (locale: AppLocale): Promise<AppLocale> =>

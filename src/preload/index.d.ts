@@ -14,6 +14,7 @@ import type {
   HermesAccount,
   HermesAccountUser,
 } from "../shared/account";
+import type { AgentSyncResult, AgentSyncStatus } from "../shared/agent-sync";
 import type {
   RegistryKind,
   RegistryItem,
@@ -267,6 +268,13 @@ interface HermesAPI {
   onAccountLoginProgress: (callback: (chunk: string) => void) => () => void;
   getAccount: (profile?: string) => Promise<HermesAccount | null>;
   accountLogout: (profile?: string) => Promise<{ success: boolean }>;
+
+  // Cloud agent sync (profiles ↔ signed-in Hermes One account)
+  syncAgents: () => Promise<AgentSyncResult>;
+  getAgentSyncStatus: () => Promise<AgentSyncStatus>;
+  onAgentSyncUpdated: (
+    callback: (result: AgentSyncResult) => void,
+  ) => () => void;
 
   getLocale: () => Promise<AppLocale>;
   setLocale: (locale: AppLocale) => Promise<AppLocale>;
