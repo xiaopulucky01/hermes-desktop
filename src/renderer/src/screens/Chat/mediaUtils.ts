@@ -217,6 +217,200 @@ function inCode(index: number, ranges: Array<[number, number]>): boolean {
   return ranges.some(([s, e]) => index >= s && index < e);
 }
 
+/** Apply `transform` only to prose regions — fenced/inline code is left verbatim. */
+function transformOutsideCode(
+  content: string,
+  transform: (text: string) => string,
+): string {
+  const ranges = codeRanges(content);
+  if (ranges.length === 0) return transform(content);
+  ranges.sort((a, b) => a[0] - b[0]);
+  let result = "";
+  let last = 0;
+  for (const [start, end] of ranges) {
+    result += transform(content.slice(last, start));
+    result += content.slice(start, end);
+    last = end;
+  }
+  result += transform(content.slice(last));
+  return result;
+}
+
+// A GFM table row: pipe-delimited with at least two interior cells.
+const TABLE_ROW_RE = /^\|[^|\n]+\|[^|\n]+\|/;
+const TABLE_SEPARATOR_RE = /^\|\s*[-:][-:|\s]+\|/;
+
+function isTableLine(trimmed: string): boolean {
+  if (TABLE_SEPARATOR_RE.test(trimmed)) return true;
+  return TABLE_ROW_RE.test(trimmed);
+}
+
+function isTableDataOrHeaderRow(trimmed: string): boolean {
+  return !TABLE_SEPARATOR_RE.test(trimmed) && TABLE_ROW_RE.test(trimmed);
+}
+
+function previousNonBlankLine(lines: string[], start: number): string | null {
+  for (let i = start; i >= 0; i--) {
+    const t = lines[i].trim();
+    if (t !== "") return t;
+  }
+  return null;
+}
+
+function nextNonBlankLine(lines: string[], start: number): string | null {
+  for (let i = start; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t !== "") return t;
+  }
+  return null;
+}
+
+/** GFM tables must be contiguous — drop blank lines between table rows. */
+function compactTableBlocks(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === "") {
+      const prev = previousNonBlankLine(lines, i - 1);
+      const next = nextNonBlankLine(lines, i + 1);
+      if (prev && next && isTableLine(prev) && isTableLine(next)) {
+        continue;
+      }
+    }
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
+
+/** Ensure every table row ends with a closing pipe for stable GFM parsing. */
+function normalizeTableRowPipes(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!isTableLine(trimmed) || trimmed.endsWith("|")) return line;
+      const leading = line.match(/^\s*/)?.[0] ?? "";
+      return `${leading}${trimmed} |`;
+    })
+    .join("\n");
+}
+
+/** Split table rows glued on one line: "| ~5MB | | 桌面壳 |" → newline boundary. */
+function splitGluedTableRowsInLine(line: string): string {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|")) return line;
+  let s = line;
+  let prev: string;
+  do {
+    prev = s;
+    // Row ends with cell content, next row starts — not an empty cell "| |".
+    s = s.replace(/(\S)\s*\|\s*\|(\s*\S)/g, "$1 |\n|$2");
+  } while (s !== prev);
+  return s;
+}
+
+/** Insert a GFM separator after a header when the model skipped it. */
+function looksLikeTableHeader(row: string): boolean {
+  const cells = row
+    .split("|")
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (cells.length < 2) return false;
+  return cells.every(
+    (c) =>
+      c.length <= 20 &&
+      !/[~✅❌✓✗$→%+]/.test(c) &&
+      !/\d+\s*(?:MB|KB|GB|ms|s|\/月)\b/i.test(c) &&
+      !/^\d+/.test(c),
+  );
+}
+
+function insertMissingTableSeparators(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    out.push(line);
+    if (!TABLE_ROW_RE.test(trimmed) || TABLE_SEPARATOR_RE.test(trimmed)) {
+      continue;
+    }
+    const prev = lines[i - 1]?.trim() ?? "";
+    const next = lines[i + 1]?.trim() ?? "";
+    const tableStart = !prev || !isTableLine(prev);
+    if (
+      tableStart &&
+      looksLikeTableHeader(trimmed) &&
+      next &&
+      isTableDataOrHeaderRow(next)
+    ) {
+      const cells = trimmed.split("|").filter((c) => c.trim().length > 0).length;
+      if (cells >= 2) {
+        out.push(`|${" --- |".repeat(cells)}`);
+      }
+    }
+  }
+  return out.join("\n");
+}
+
+/**
+ * Repair common LLM markdown glitches so remark-gfm can render tables and
+ * headings. Scoped to prose only — code fences are never touched.
+ */
+// @lat: [[code-blocks#LLM markdown normalization]]
+export function normalizeAgentMarkdown(content: string): string {
+  if (!content) return content;
+
+  return transformOutsideCode(content, (text) => {
+    let s = text;
+
+    // "...文字## 标题" → break before the heading marker.
+    s = s.replace(/([^\n#])(#{1,6}\s+)/g, "$1\n\n$2");
+
+    // Header row glued to its separator: "| a | b | |---|---|" → newline.
+    s = s.replace(/(\|[^|\n]+\|[^|\n]+\|[^|\n]*\|)\s*(\|[-:][-:| ]+\|)/g, "$1\n$2");
+
+    // Double-pipe before a separator row: "原因 ||---|" → "原因 |\n|---|".
+    s = s.replace(/\|\s*\|(?=[-:])/g, "|\n|");
+
+    // Blank line before a table when it immediately follows prose.
+    s = s.replace(
+      /([^\n|][^\n]*)\n(\|[^|\n]+\|[^|\n]+\|)/g,
+      (match, before: string, row: string) => {
+        if (TABLE_SEPARATOR_RE.test(row.trim())) return match;
+        return `${before}\n\n${row}`;
+      },
+    );
+
+    // Ensure each table row sits on its own line when rows were concatenated.
+    s = s.replace(
+      /(\|[^|\n]+\|[^|\n]+\|[^|\n]*\|)\s+(\|[^\n]+)/g,
+      (match, row: string, next: string) => {
+        const nextRow = next.trim();
+        if (TABLE_SEPARATOR_RE.test(nextRow) || TABLE_ROW_RE.test(nextRow)) {
+          return `${row}\n${next}`;
+        }
+        return match;
+      },
+    );
+
+    // "| ~5MB | | 桌面壳 |" and similar row glue on a single line.
+    s = s
+      .split("\n")
+      .flatMap((line) => splitGluedTableRowsInLine(line).split("\n"))
+      .join("\n");
+
+    // Blank lines between rows break GFM tables — compact before inserting separators.
+    s = compactTableBlocks(s);
+
+    s = insertMissingTableSeparators(s);
+    s = normalizeTableRowPipes(s);
+
+    return s;
+  });
+}
+
 function overlaps(start: number, end: number, hits: Hit[]): boolean {
   return hits.some((h) => start < h.end && end > h.start);
 }

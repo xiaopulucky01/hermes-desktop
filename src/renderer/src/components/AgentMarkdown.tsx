@@ -1,32 +1,83 @@
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, memo, useMemo } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Copy } from "lucide-react";
 import { useI18n } from "./useI18n";
 import { MediaImage, DownloadChip } from "./MediaImage";
-import { describeImageSrc } from "../screens/Chat/mediaUtils";
+import { describeImageSrc, normalizeAgentMarkdown } from "../screens/Chat/mediaUtils";
+import { THEMES } from "../constants";
+import { useTheme } from "./ThemeProvider";
+import {
+  isStrongCodeLanguage,
+  resolvePrismLanguage,
+} from "./prismLanguage";
 
 // Lazy-load the heavy syntax highlighter — only imported when a code block renders
 let _highlighterMod: typeof import("react-syntax-highlighter") | null = null;
-let _oneDark: Record<string, React.CSSProperties> | null = null;
-let _loadingPromise: Promise<void> | null = null;
+let _prismStyleDark: Record<string, React.CSSProperties> | null = null;
+let _prismStyleLight: Record<string, React.CSSProperties> | null = null;
+let _loadingDark: Promise<void> | null = null;
+let _loadingLight: Promise<void> | null = null;
 
-// Box Drawing (U+2500\u2013U+257F) plus Block Elements (U+2580\u2013U+259F): tree
-// connectors like \u251C\u2500\u2500 \u2514\u2500\u2500 \u2502 and the shading/progress-bar glyphs \u2588 \u2591 \u2592 \u2593.
+function themeAppearance(resolved: string): "light" | "dark" {
+  return THEMES.find((t) => t.id === resolved)?.appearance ?? "dark";
+}
+
+function loadHighlighter(appearance: "light" | "dark"): Promise<void> {
+  if (_highlighterMod) {
+    if (appearance === "light" && _prismStyleLight) return Promise.resolve();
+    if (appearance === "dark" && _prismStyleDark) return Promise.resolve();
+  }
+  const loadingRef = appearance === "light" ? _loadingLight : _loadingDark;
+  if (loadingRef) return loadingRef;
+
+  const styleImport =
+    appearance === "light"
+      ? import("react-syntax-highlighter/dist/esm/styles/prism/one-light")
+      : import("react-syntax-highlighter/dist/esm/styles/prism/one-dark");
+
+  const promise = Promise.all([
+    _highlighterMod
+      ? Promise.resolve(_highlighterMod)
+      : import("react-syntax-highlighter"),
+    styleImport,
+  ]).then(([mod, style]) => {
+    _highlighterMod = mod as typeof import("react-syntax-highlighter");
+    if (appearance === "light") _prismStyleLight = style.default;
+    else _prismStyleDark = style.default;
+  });
+
+  if (appearance === "light") _loadingLight = promise;
+  else _loadingDark = promise;
+  return promise;
+}
+
+function prismStyleFor(appearance: "light" | "dark"): Record<string, React.CSSProperties> | null {
+  return appearance === "light" ? _prismStyleLight : _prismStyleDark;
+}
+
+// Box Drawing (U+2500–U+257F) plus Block Elements (U+2580–U+259F): tree
+// connectors like ├─ └─ │ and the shading/progress-bar glyphs █ ░ ▒ ▓.
 const BOX_DRAWING_RE = /[\u2500-\u259F]/;
 
-// A block is a "box diagram" (tree output, table borders, progress bars) only
-// when box-drawing characters dominate it \u2014 at least half of its non-empty
-// lines contain one. A single \u2502 in a string literal or comment must NOT
-// demote a whole source file to plain text, but a tree diagram (box chars on
-// nearly every line) should never go through Prism: it fragments each glyph
-// into nested token spans, which Electron renderers with imperfect Unicode
-// metrics can visually truncate or misalign.
-function isBoxDiagram(code: string): boolean {
+// ASCII flowcharts the model often emits inside unlabeled fences: arrows,
+// repeated pipes/underscores, comparison columns. Prism tokenizes these
+// into per-glyph spans that Electron misaligns, so they render as plain text.
+const ASCII_DIAGRAM_RE =
+  /(?:[|_]{3,}|[-=~]{4,}|[→←↑↓↔↕⟶⟵▶▷►])/;
+
+function isDiagramLine(line: string): boolean {
+  return BOX_DRAWING_RE.test(line) || ASCII_DIAGRAM_RE.test(line);
+}
+
+// A block is a diagram (tree output, flowchart, table borders) when diagram
+// characters dominate it — at least half of its non-empty lines contain one.
+// @lat: [[code-blocks#Box diagrams render plain, not highlighted]]
+function isPlainDiagram(code: string): boolean {
   const lines = code.split("\n").filter((line) => line.trim() !== "");
   if (lines.length === 0) return false;
-  const boxLines = lines.filter((line) => BOX_DRAWING_RE.test(line)).length;
-  return boxLines * 2 >= lines.length;
+  const diagramLines = lines.filter(isDiagramLine).length;
+  return diagramLines * 2 >= lines.length;
 }
 
 const PLAIN_PRE_STYLE: React.CSSProperties = {
@@ -47,19 +98,6 @@ const PLAIN_CODE_STYLE: React.CSSProperties = {
   padding: 0,
   whiteSpace: "pre",
 };
-
-function loadHighlighter(): Promise<void> {
-  if (_highlighterMod && _oneDark) return Promise.resolve();
-  if (_loadingPromise) return _loadingPromise;
-  _loadingPromise = Promise.all([
-    import("react-syntax-highlighter"),
-    import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
-  ]).then(([mod, style]) => {
-    _highlighterMod = mod;
-    _oneDark = style.default;
-  });
-  return _loadingPromise;
-}
 
 // Diff viewer with colored +/- lines
 function DiffView({ code }: { code: string }): React.JSX.Element {
@@ -106,32 +144,41 @@ function CodeBlock({
   blockId?: string;
 }): React.JSX.Element {
   const { t } = useI18n();
+  const { resolved } = useTheme();
+  const appearance = themeAppearance(resolved);
+  const prismStyle = prismStyleFor(appearance);
   const [copied, setCopied] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() =>
     blockId ? !expandedCodeBlocks.has(blockId) : true,
   );
   const [highlighterReady, setHighlighterReady] = useState(
-    () => _highlighterMod !== null && _oneDark !== null,
+    () => _highlighterMod !== null && prismStyle !== null,
   );
   const code = String(children).replace(/\n$/, "");
-  const match = /language-(\w+)/.exec(className || "");
-  const language = match ? match[1] : "";
-  const isDiff = language === "diff";
+  const match = /language-(\S+)/.exec(className || "");
+  const rawLanguage = match ? match[1] : "";
+  const prismLanguage = resolvePrismLanguage(rawLanguage, code);
+  const isDiff = prismLanguage === "diff";
   // Diffs win over the box-diagram check: DiffView is already a plain per-line
   // renderer (no Prism), so it has no fragmentation risk, and a patch touching
   // a tree diagram must keep its colored +/- view.
-  const boxDiagram = !isDiff && isBoxDiagram(code);
+  const boxDiagram =
+    !isDiff &&
+    isPlainDiagram(code) &&
+    !isStrongCodeLanguage(prismLanguage);
 
   const linesCount = code.split("\n").length;
   const isLong = linesCount > 15 || code.length > 800;
 
-  // Trigger lazy load when code block mounts. Box diagrams and diffs never
-  // use Prism, so don't pull in the highlighter for them (see isBoxDiagram).
+  // Load the palette-matching Prism theme (one-light / one-dark).
   useEffect(() => {
-    if (!boxDiagram && !isDiff && !highlighterReady) {
-      loadHighlighter().then(() => setHighlighterReady(true));
+    if (boxDiagram || isDiff) return;
+    if (prismStyleFor(appearance)) {
+      setHighlighterReady(true);
+      return;
     }
-  }, [boxDiagram, highlighterReady, isDiff]);
+    loadHighlighter(appearance).then(() => setHighlighterReady(true));
+  }, [appearance, boxDiagram, isDiff]);
 
   function handleCopy(): void {
     void window.hermesAPI.copyToClipboard(code);
@@ -143,17 +190,21 @@ function CodeBlock({
     <DiffView code={code} />
   ) : boxDiagram ? (
     <PlainCodeView code={code} />
-  ) : highlighterReady && _highlighterMod && _oneDark ? (
+  ) : highlighterReady && _highlighterMod && prismStyle ? (
     <_highlighterMod.Prism
-      style={_oneDark}
-      language={language || "text"}
+      style={prismStyle}
+      language={prismLanguage}
       PreTag="div"
       customStyle={{
         margin: 0,
         borderRadius: 0,
         fontSize: "13px",
+        lineHeight: 1.5,
         padding: "12px",
         background: "transparent",
+      }}
+      codeTagProps={{
+        className: `language-${prismLanguage}`,
       }}
     >
       {code}
@@ -169,7 +220,9 @@ function CodeBlock({
           {/* Keep the fence's declared language even when a box diagram
               renders plain — the header describes the fence, not the
               renderer. Only default to "text" when none was declared. */}
-          {isDiff ? "diff" : language || (boxDiagram ? "text" : "code")}
+          {isDiff
+            ? "diff"
+            : rawLanguage || (boxDiagram ? "text" : prismLanguage)}
         </span>
         <button className="chat-code-copy" onClick={handleCopy}>
           {copied ? t("common.copied") : <Copy size={13} />}
@@ -208,6 +261,7 @@ const AgentMarkdown = memo(function AgentMarkdown({
 }: {
   children: string;
 }): React.JSX.Element {
+  const normalized = useMemo(() => normalizeAgentMarkdown(children), [children]);
   return (
     <Markdown
       remarkPlugins={[remarkGfm]}
@@ -251,6 +305,11 @@ const AgentMarkdown = memo(function AgentMarkdown({
             <DownloadChip token={token} />
           );
         },
+        table: ({ children }) => (
+          <div className="chat-table-wrap">
+            <table>{children}</table>
+          </div>
+        ),
         code: ({ className, children, node, ...props }) => {
           const isInline =
             !className &&
@@ -279,7 +338,7 @@ const AgentMarkdown = memo(function AgentMarkdown({
         },
       }}
     >
-      {children}
+      {normalized}
     </Markdown>
   );
 });

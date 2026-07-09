@@ -4,6 +4,7 @@ import {
   hasMediaTokens,
   describeImageSrc,
   cleanLeakedToolTags,
+  normalizeAgentMarkdown,
   type MediaSegment,
 } from "./mediaUtils";
 
@@ -512,5 +513,73 @@ describe("cleanLeakedToolTags", () => {
   it("is a no-op (same reference path) when there is no closing tag", () => {
     const text = "no closing tag here";
     expect(cleanLeakedToolTags(text)).toBe(text);
+  });
+});
+
+describe("normalizeAgentMarkdown", () => {
+  it("breaks mid-line headings before remark-gfm parses them", () => {
+    const raw = "你问到了核心问题。让我## 之前的方案能解决吗？";
+    expect(normalizeAgentMarkdown(raw)).toBe(
+      "你问到了核心问题。让我\n\n## 之前的方案能解决吗？",
+    );
+  });
+
+  it("inserts a blank line before a table that follows prose", () => {
+    const raw = "目标如下\n| 目标 | 能否解决 | 原因 |";
+    expect(normalizeAgentMarkdown(raw)).toBe(
+      "目标如下\n\n| 目标 | 能否解决 | 原因 |",
+    );
+  });
+
+  it("splits a header row glued to its separator", () => {
+    const raw = "| 目标 | 能否解决 | 原因 ||-------|----------|-----|";
+    expect(normalizeAgentMarkdown(raw)).toBe(
+      "| 目标 | 能否解决 | 原因 |\n|-------|----------|-----|",
+    );
+  });
+
+  it("leaves fenced code untouched", () => {
+    const raw = "prose\n```\n| a | b ||---|\n```";
+    expect(normalizeAgentMarkdown(raw)).toBe(raw);
+  });
+
+  it("splits multiple table data rows glued on one line", () => {
+    const raw =
+      "| 编辑器 | Monaco Editor | VS Code 核心 | ~5MB | | 桌面壳 | Electron | 跨平台 | ~80MB |";
+    expect(normalizeAgentMarkdown(raw)).toBe(
+      [
+        "| 编辑器 | Monaco Editor | VS Code 核心 | ~5MB |",
+        "| 桌面壳 | Electron | 跨平台 | ~80MB |",
+      ].join("\n"),
+    );
+  });
+
+  it("inserts a separator row when the model omits it", () => {
+    const raw = [
+      "## 技术栈选择",
+      "",
+      "| 组件 | 选择 | 理由 | 体积 |",
+      "| 编辑器 | Monaco Editor | 成熟 | ~5MB |",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| --- | --- | --- | --- |");
+    expect(out.split("\n").indexOf("| --- | --- | --- | --- |")).toBe(
+      out.split("\n").indexOf("| 组件 | 选择 | 理由 | 体积 |") + 1,
+    );
+  });
+
+  it("removes blank lines between table rows so GFM keeps one table", () => {
+    const raw = [
+      "| 维度 | Cursor | Hermes Code | 优势 |",
+      "| --- | --- | --- | --- |",
+      "| 多平台 | 只有 IDE | 20+ IM 平台 | 更灵活 |",
+      "",
+      "| 学习系统 | 无 | Memory + Skills | 越用越好 |",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toMatch(/\|\n\n\|/);
+    expect(out.split("\n").filter((l) => l.trim().startsWith("|")).length).toBe(
+      4,
+    );
   });
 });
