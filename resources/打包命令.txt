@@ -1,0 +1,3 @@
+npm run prepare-runtime
+npm run pack-runtime
+npm run build:win

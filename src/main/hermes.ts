@@ -22,8 +22,11 @@ import {
   HERMES_HOME,
   HERMES_REPO,
   HERMES_PYTHON,
+  USE_BUNDLED_ENGINE,
   hermesCliArgs,
   getEnhancedPath,
+  getHermesPythonSpawnPath,
+  formatHermesSpawnError,
 } from "./installer";
 import {
   getApiServerKey,
@@ -2594,7 +2597,7 @@ function sendMessageViaCli(
   });
 
   proc.on("error", (err) => {
-    cb.onError(err.message);
+    cb.onError(formatHermesSpawnError(err, getHermesPythonSpawnPath()));
   });
 
   return {
@@ -3010,9 +3013,16 @@ function invalidateApiCacheFor(profile?: string): void {
 }
 
 function getGatewaySpawnError(): string | null {
-  if (!existsSync(HERMES_PYTHON)) {
+  const pythonPath = getHermesPythonSpawnPath();
+  if (!existsSync(pythonPath)) {
+    if (USE_BUNDLED_ENGINE) {
+      return (
+        `Cannot start the gateway because the bundled Python interpreter was not found at ${pythonPath}. ` +
+        "Run `npm run prepare-runtime` in the project root, then restart the app."
+      );
+    }
     return (
-      `Cannot start the gateway because the Hermes Python interpreter was not found at ${HERMES_PYTHON}. ` +
+      `Cannot start the gateway because the Hermes Python interpreter was not found at ${pythonPath}. ` +
       "Install or repair Hermes Agent, then try again."
     );
   }
@@ -3215,7 +3225,7 @@ export function startGatewayDetailed(profile?: string): GatewayStartResult {
   proc.on("error", (err) => {
     console.error(
       `[gateway:${key}] Failed to spawn gateway process:`,
-      err.message,
+      formatHermesSpawnError(err, getHermesPythonSpawnPath()),
     );
     if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
     appStartedProfiles.delete(key);

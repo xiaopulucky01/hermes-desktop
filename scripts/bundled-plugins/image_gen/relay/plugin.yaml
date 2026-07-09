@@ -1,0 +1,4 @@
+name: relay
+kind: backend
+version: 1.0.0
+description: "Desktop relay — delegates image generation to the configured upstream provider and indexes outputs in My Works."

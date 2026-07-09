@@ -28,6 +28,7 @@
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
     "build:rpm": "npm run build && electron-builder --linux rpm",
+    "prepare-runtime": "node scripts/prepare-runtime.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

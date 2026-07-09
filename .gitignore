@@ -3,6 +3,8 @@
 
 # Dependencies
 node_modules/
+resources/playwright-browsers
+resources/python
 
 # Build output
 dist/

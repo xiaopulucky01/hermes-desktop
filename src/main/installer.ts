@@ -21,8 +21,25 @@ import { getActiveProfileNameSync, profileHome, stripAnsi } from "./utils";
 import { setupAskpass, AskpassHandle } from "./askpass";
 import { precacheSudoCredentials } from "./sudoCreds";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import {
+  bundledRuntimeEnv,
+  defaultBundledHermesHome,
+  ensureBundledUserHome,
+  getBundledRuntimeLayout,
+  resolveBundledSpawnExecutable,
+  type BundledRuntimeLayout,
+} from "./bundled-runtime";
 
 const IS_WINDOWS = process.platform === "win32";
+
+let bundledLayoutCache: BundledRuntimeLayout | null | undefined;
+
+function getBundledLayout(): BundledRuntimeLayout | null {
+  if (bundledLayoutCache === undefined) {
+    bundledLayoutCache = getBundledRuntimeLayout();
+  }
+  return bundledLayoutCache;
+}
 
 const HERMES_DESKTOP_USER_DATA_DIR =
   process.env.HERMES_DESKTOP_USER_DATA_DIR?.trim();
@@ -67,10 +84,16 @@ function defaultHermesHome(): string {
   const localApp = process.env.LOCALAPPDATA
     ? join(process.env.LOCALAPPDATA, "hermes")
     : null;
+  const bundledHome = getBundledLayout() ? defaultBundledHermesHome() : null;
 
   // Prefer whichever location already has hermes data.
   if (localApp && looksLikeHermesHome(localApp)) return localApp;
   if (looksLikeHermesHome(homeDot)) return homeDot;
+  if (bundledHome && looksLikeHermesHome(bundledHome)) return bundledHome;
+
+  // Out-of-box bundled runtime uses a lightweight AI-Compartner home for
+  // config/sessions only — no separate 2 GB hermes-agent clone required.
+  if (bundledHome) return bundledHome;
 
   // Neither populated yet — fall back to install.ps1's default so a
   // fresh install lines up with where the installer will write.
@@ -129,8 +152,34 @@ export const HERMES_HOME =
   process.env.HERMES_HOME?.trim() ||
   readHermesHomeOverride() ||
   defaultHermesHome();
-export const HERMES_REPO = join(HERMES_HOME, "hermes-agent");
-export const HERMES_VENV = join(HERMES_REPO, "venv");
+
+function hasTraditionalInstall(home: string): boolean {
+  const { python, script } = installBinariesFor(home);
+  return existsSync(python) && existsSync(script);
+}
+
+function shouldUseBundledEngine(home: string): boolean {
+  if (!getBundledLayout()) return false;
+  const mode = process.env.HERMES_BUNDLED_RUNTIME?.trim();
+  if (mode === "1") return true;
+  if (mode === "0") return false;
+  return !hasTraditionalInstall(home);
+}
+
+export const USE_BUNDLED_ENGINE = shouldUseBundledEngine(HERMES_HOME);
+
+if (USE_BUNDLED_ENGINE && getBundledLayout()) {
+  ensureBundledUserHome(HERMES_HOME);
+}
+
+export const HERMES_REPO =
+  USE_BUNDLED_ENGINE && getBundledLayout()
+    ? getBundledLayout()!.root
+    : join(HERMES_HOME, "hermes-agent");
+export const HERMES_VENV =
+  USE_BUNDLED_ENGINE && getBundledLayout()
+    ? getBundledLayout()!.root
+    : join(HERMES_REPO, "venv");
 // On Windows, use `pythonw.exe` (the GUI-subsystem interpreter that ships in
 // every venv) instead of `python.exe` so that subprocess spawns don't flash
 // a blank console window before `windowsHide: true` / CREATE_NO_WINDOW takes
@@ -142,12 +191,27 @@ export const HERMES_VENV = join(HERMES_REPO, "venv");
 // for it regardless of creation flags. It's a bit-identical interpreter
 // otherwise — same modules, same stdout/stderr behaviour over piped stdio
 // (which is what every call site here uses).
-export const HERMES_PYTHON = IS_WINDOWS
-  ? join(HERMES_VENV, "Scripts", "pythonw.exe")
-  : join(HERMES_VENV, "bin", "python");
-export const HERMES_SCRIPT = IS_WINDOWS
-  ? join(HERMES_VENV, "Scripts", "hermes.exe")
-  : join(HERMES_REPO, "hermes");
+//
+// The prepare-runtime bundle (python-build-standalone) is different: prefer
+// `python.exe` there — sitecustomize.py applies CREATE_NO_WINDOW, and
+// realpath-normalized `python.exe` is more reliable under CreateProcess when
+// the install path contains non-ASCII characters.
+export const HERMES_PYTHON =
+  USE_BUNDLED_ENGINE && getBundledLayout()
+    ? IS_WINDOWS
+      ? resolveBundledSpawnExecutable(getBundledLayout()!.root)
+      : join(getBundledLayout()!.root, "bin", "python3")
+    : IS_WINDOWS
+      ? join(HERMES_VENV, "Scripts", "pythonw.exe")
+      : join(HERMES_VENV, "bin", "python");
+export const HERMES_SCRIPT =
+  USE_BUNDLED_ENGINE && getBundledLayout()
+    ? IS_WINDOWS
+      ? join(getBundledLayout()!.root, "Scripts", "hermes.exe")
+      : join(getBundledLayout()!.root, "bin", "hermes")
+    : IS_WINDOWS
+      ? join(HERMES_VENV, "Scripts", "hermes.exe")
+      : join(HERMES_REPO, "hermes");
 export const HERMES_ENV_FILE = join(HERMES_HOME, ".env");
 export const HERMES_CONFIG_FILE = join(HERMES_HOME, "config.yaml");
 export const HERMES_AUTH_FILE = join(HERMES_HOME, "auth.json");
@@ -172,8 +236,110 @@ export function hermesCliArgs(args: string[] = []): string[] {
   return [HERMES_SCRIPT, ...args];
 }
 
+export function isBundledEngineActive(): boolean {
+  return USE_BUNDLED_ENGINE;
+}
+
+export function hermesSkillsDir(): string {
+  const layout = getBundledLayout();
+  if (
+    USE_BUNDLED_ENGINE &&
+    layout &&
+    existsSync(layout.skillsDir)
+  ) {
+    return layout.skillsDir;
+  }
+  return join(HERMES_REPO, "skills");
+}
+
+export function hermesWebDistDir(): string {
+  const layout = getBundledLayout();
+  if (USE_BUNDLED_ENGINE && layout) {
+    return layout.webDistDir;
+  }
+  return join(HERMES_REPO, "hermes_cli", "web_dist");
+}
+
+export function hermesPythonSourceRoot(): string {
+  const layout = getBundledLayout();
+  if (USE_BUNDLED_ENGINE && layout) {
+    return layout.sitePackages;
+  }
+  return HERMES_REPO;
+}
+
+export function getBundledSpawnEnv(): Record<string, string> {
+  const layout = getBundledLayout();
+  if (USE_BUNDLED_ENGINE && layout) {
+    return bundledRuntimeEnv(layout);
+  }
+  return {};
+}
+
+/** Child-process env for Hermes CLI/gateway spawns (bundled PYTHONPATH + flags). */
+// @lat: [[bundled-runtime#Spawn executable]]
+export function buildHermesChildEnv(
+  base: Record<string, string | undefined> = process.env as Record<
+    string,
+    string
+  >,
+): Record<string, string> {
+  const envPathDelimiter = IS_WINDOWS ? ";" : ":";
+  const pythonRoot = hermesPythonSourceRoot();
+  const env: Record<string, string> = {
+    ...base,
+    PATH: getEnhancedPath(),
+    HOME: homedir(),
+    HERMES_HOME: HERMES_HOME,
+    HERMES_PYTHON_SRC_ROOT: pythonRoot,
+    PYTHONUNBUFFERED: "1",
+    ...getBundledSpawnEnv(),
+  };
+  const existingPythonPath = env.PYTHONPATH?.trim();
+  env.PYTHONPATH = existingPythonPath
+    ? `${pythonRoot}${envPathDelimiter}${existingPythonPath}`
+    : pythonRoot;
+  return env;
+}
+
+/** Re-resolve the bundled interpreter path immediately before spawn. */
+export function getHermesPythonSpawnPath(): string {
+  const layout = getBundledLayout();
+  if (USE_BUNDLED_ENGINE && layout && IS_WINDOWS) {
+    return resolveBundledSpawnExecutable(layout.root);
+  }
+  return HERMES_PYTHON;
+}
+
+/** Turn spawn ENOENT into an actionable message for the bundled dev runtime. */
+// @lat: [[bundled-runtime#Spawn executable]]
+export function formatHermesSpawnError(
+  err: NodeJS.ErrnoException,
+  attemptedPath: string,
+): string {
+  if (err.code === "ENOENT") {
+    if (USE_BUNDLED_ENGINE) {
+      return (
+        `Bundled Python interpreter not found at ${attemptedPath}. ` +
+        "Run `npm run prepare-runtime` in the project root, then restart the app."
+      );
+    }
+    return (
+      `Hermes Python interpreter not found at ${attemptedPath}. ` +
+      "Install or repair Hermes Agent, then try again."
+    );
+  }
+  return err.message;
+}
+
 function canInvokeHermesCli(): boolean {
   if (!existsSync(HERMES_PYTHON)) return false;
+  const layout = getBundledLayout();
+  if (USE_BUNDLED_ENGINE && layout) {
+    return existsSync(
+      join(layout.sitePackages, "hermes_cli", "main.py"),
+    );
+  }
   if (IS_WINDOWS) {
     return existsSync(join(HERMES_REPO, "hermes_cli", "main.py"));
   }
@@ -207,7 +373,12 @@ export function getEnhancedPath(): string {
           join(HERMES_HOME, "git", "cmd"),
           join(HERMES_HOME, "git", "usr", "bin"),
           join(HERMES_HOME, "node"),
-          join(HERMES_VENV, "Scripts"),
+          USE_BUNDLED_ENGINE && getBundledLayout()
+            ? getBundledLayout()!.root
+            : join(HERMES_VENV, "Scripts"),
+          USE_BUNDLED_ENGINE && getBundledLayout()
+            ? join(getBundledLayout()!.root, "Scripts")
+            : undefined,
           // Common user/system installs used when Claw3D setup runs before or
           // outside the bundled installer.
           process.env.NVM_SYMLINK,
@@ -316,16 +487,7 @@ const PROVIDER_ENV_KEYS: Record<string, string> = {
   perplexity: "PERPLEXITY_API_KEY",
   huggingface: "HF_TOKEN",
   hf: "HF_TOKEN",
-  // DashScope: `alibaba` is the canonical agent slug; the rest are the
-  // agent's own aliases for it (models.py PROVIDER_ALIASES) — including
-  // `qwen`, which every pre-#825 desktop config stored. Only `qwen-oauth`
-  // is the Qwen Portal OAuth provider.
-  alibaba: "DASHSCOPE_API_KEY",
-  dashscope: "DASHSCOPE_API_KEY",
-  qwen: "DASHSCOPE_API_KEY",
-  aliyun: "DASHSCOPE_API_KEY",
-  "alibaba-cloud": "DASHSCOPE_API_KEY",
-  "qwen-oauth": "QWEN_API_KEY",
+  qwen: "QWEN_API_KEY",
   minimax: "MINIMAX_API_KEY",
   glm: "GLM_API_KEY",
   kimi: "KIMI_API_KEY",
@@ -360,7 +522,6 @@ const URL_TO_ENV_KEY: Array<[RegExp, string]> = [
   [/api\.mistral\.ai/i, "MISTRAL_API_KEY"],
   [/api\.perplexity\.ai/i, "PERPLEXITY_API_KEY"],
   [/api\.xiaomimimo\.com/i, "XIAOMI_API_KEY"],
-  [/dashscope(-intl)?\.aliyuncs\.com/i, "DASHSCOPE_API_KEY"],
 ];
 
 /**
@@ -485,7 +646,9 @@ export function checkInstallStatus(): InstallStatus {
   // `python --version` check used to run here adds 1–10s of cold-start
   // latency, so it now lives in `verifyInstall()` and is invoked lazily
   // by the renderer after the main UI is mounted.
-  const installed = existsSync(HERMES_PYTHON) && existsSync(HERMES_SCRIPT);
+  const installed = USE_BUNDLED_ENGINE
+    ? canInvokeHermesCli()
+    : existsSync(HERMES_PYTHON) && existsSync(HERMES_SCRIPT);
   const envFile = activeEnvFile(activeProfile);
   const authFile = activeAuthFile(activeProfile);
   const configured = existsSync(envFile) || existsSync(authFile);
@@ -622,7 +785,7 @@ export function runHermesDoctor(): string {
     return "Hermes is not installed.";
   }
   try {
-    const output = execFileSync(HERMES_PYTHON, hermesCliArgs(["doctor"]), {
+    const output = execFileSync(getHermesPythonSpawnPath(), hermesCliArgs(["doctor"]), {
       cwd: HERMES_REPO,
       env: {
         ...process.env,
@@ -707,7 +870,7 @@ export async function runClawMigrate(
   return new Promise((resolve, reject) => {
     const args = hermesCliArgs(["claw", "migrate", "--preset", "full"]);
 
-    const proc = spawn(HERMES_PYTHON, args, {
+    const proc = spawn(getHermesPythonSpawnPath(), args, {
       cwd: HERMES_REPO,
       env: {
         ...process.env,
@@ -765,7 +928,7 @@ export async function runHermesUpdate(
   emit("Running hermes update...\n");
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(HERMES_PYTHON, hermesCliArgs(["update"]), {
+    const proc = spawn(getHermesPythonSpawnPath(), hermesCliArgs(["update"]), {
       cwd: HERMES_REPO,
       env: {
         ...process.env,

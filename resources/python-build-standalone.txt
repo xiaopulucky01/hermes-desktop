@@ -1,0 +1,6 @@
+1、可使用https://github.com/astral-sh/python-build-standalone/releases/download/20250323/cpython-3.11.15+20250323-x86_64-pc-windows-msvc-install_only.tar.gz来下载
+新版本：
+https://github.com/astral-sh/python-build-standalone/releases/download/20260610/cpython-3.11.15+20260610-x86_64-pc-windows-msvc-install_only.tar.gz
+																		    cpython-3.11.15+20260623-x86_64-pc-windows-msvc-install_only.tar.gz
+2、然后再更名为python-build-standalone.tar.gz
+3、用npm run prepare-runtime解压并下载
