@@ -354,6 +354,243 @@ function insertMissingTableSeparators(text: string): string {
   return out.join("\n");
 }
 
+const MISLABELED_FENCE_LANGS = new Set([
+  "yaml",
+  "yml",
+  "json",
+  "text",
+  "plaintext",
+  "plain",
+  "markdown",
+  "md",
+  "",
+]);
+
+/** True when a fenced block's body is markdown prose mislabeled as yaml/json/etc. */
+function fenceContentIsMarkdown(body: string, lang: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed || !MISLABELED_FENCE_LANGS.has(lang)) return false;
+
+  const lines = trimmed.split("\n").filter((line) => line.trim() !== "");
+  const tableRows = lines.filter((line) => isTableLine(line.trim())).length;
+  const hasMarkdownHeader = /^#{1,6}\s+\S/m.test(trimmed);
+  const hasMarkdownBold = /\*\*[^*]+\*\*/.test(trimmed);
+
+  if (hasMarkdownHeader && tableRows >= 1) return true;
+  if (tableRows >= 2 && (hasMarkdownHeader || hasMarkdownBold)) return true;
+  if (lines.length >= 2 && tableRows * 2 >= lines.length) return true;
+  return false;
+}
+
+/** Strip fences around markdown the model wrongly wrapped in yaml/json/text blocks. */
+function unwrapMislabeledFences(content: string): string {
+  return content.replace(
+    /^```(\w*)\r?\n([\s\S]*?)\r?\n```/gm,
+    (match, lang: string, body: string) => {
+      if (fenceContentIsMarkdown(body, lang.trim().toLowerCase())) {
+        return `\n\n${body.trim()}\n\n`;
+      }
+      return match;
+    },
+  );
+}
+
+const BARE_CODE_PATTERNS = [
+  /^\s*\/\/(?:\s|$)/,
+  /^\s*\/\*/,
+  /^\s*\*\//,
+  /^\s*#include\b/,
+  /^\s*import\s+(?:\{|\w)/,
+  /^\s*export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|var)/,
+  /^\s*(?:const|let|var)\s+\w/,
+  /^\s*(?:async\s+)?function\s+\w/,
+  /^\s*class\s+\w/,
+  /^\s*app\.(?:get|post|put|delete|patch|use|listen)\b/,
+  /^\s*router\./,
+  /^\s*module\.exports/,
+  /^\s*require\s*\(/,
+  /^\s*res\.(?:json|send|status|end)\b/,
+  /^\s*req\./,
+  /^\s*\}\s*\)\s*;?\s*$/,
+  /^\s*\}\s*;?\s*$/,
+  /^\s*\)\s*=>\s*\{/,
+  /^\s*\w+\s*\(\s*(?:req|res|err)\b/,
+  /^\S['"]\s*,\s*\(\s*(?:req|res)\b/,
+  /^\s*\w+\.\w+\([^)]*\)\s*;?\s*$/,
+  /^\s*\}\)\s*;?\s*$/,
+];
+
+/** True when a prose line looks like source code rather than markdown/table text. */
+function looksLikeCodeLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/^#{1,6}\s/.test(trimmed)) return false;
+  if (TABLE_ROW_RE.test(trimmed)) return false;
+  if (/^[-*+]\s/.test(trimmed)) return false;
+  if (/^>\s/.test(trimmed)) return false;
+  if (/^```/.test(trimmed)) return false;
+  return BARE_CODE_PATTERNS.some((pattern) => pattern.test(line) || pattern.test(trimmed));
+}
+
+function detectBareCodeLanguage(block: string): string {
+  const sample = block.trim().slice(0, 4000);
+  if (
+    /app\.(?:get|post|put|delete|patch|use|listen)\b/.test(sample) ||
+    /res\.(?:json|send|status)\b/.test(sample) ||
+    /\(\s*(?:req|res)\s*,/.test(sample)
+  ) {
+    return "javascript";
+  }
+  if (/^\s*(?:def|class)\s+\w+.*:|^\s*from\s+\w+\s+import/m.test(sample)) {
+    return "python";
+  }
+  if (/^\s*(?:interface|type|enum)\s+\w+/m.test(sample)) {
+    return "typescript";
+  }
+  return "javascript";
+}
+
+/** Wrap consecutive bare code lines in a fenced block so Prism can highlight them. */
+function wrapBareCodeBlocks(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (!looksLikeCodeLine(lines[i])) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    const start = i;
+    let codeLineCount = 0;
+    while (i < lines.length) {
+      const trimmed = lines[i].trim();
+      if (trimmed === "") {
+        const next = nextNonBlankLine(lines, i + 1);
+        if (next && looksLikeCodeLine(next)) {
+          out.push(lines[i]);
+          i++;
+          continue;
+        }
+        break;
+      }
+      if (!looksLikeCodeLine(lines[i])) break;
+      codeLineCount++;
+      i++;
+    }
+
+    const block = lines.slice(start, i).join("\n");
+    if (codeLineCount >= 2) {
+      const lang = detectBareCodeLanguage(block);
+      out.push(`\`\`\`${lang}`, block, "```");
+    } else {
+      out.push(...lines.slice(start, i));
+    }
+  }
+
+  return out.join("\n");
+}
+
+/** Close an opening fence before trailing prose when the model omitted the closing ```. */
+function closeUnclosedFences(content: string): string {
+  const lines = content.split("\n");
+  let openIndex = -1;
+  let depth = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (/^```/.test(lines[i].trim())) {
+      if (depth === 0) openIndex = i;
+      depth = depth === 0 ? 1 : 0;
+    }
+  }
+
+  if (depth !== 1 || openIndex < 0) return content;
+
+  for (let i = openIndex + 1; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    if (!looksLikeCodeLine(lines[i]) && !/^```/.test(trimmed)) {
+      lines.splice(i, 0, "```");
+      return lines.join("\n");
+    }
+  }
+
+  return `${content}\n\`\`\``;
+}
+
+// Tree/box connectors in LLM output — Unicode box drawing, tree glyphs, or
+// em/en dashes the model uses instead of └──.
+const TREE_CONNECTOR_RE = /[\u2500-\u259F]|(?:└|├|│)|(?:-{2,}|—{1,2})/;
+
+/** True when a prose line glues a tree diagram onto one row with `|` separators. */
+function isGluedTreeDiagramLine(trimmed: string): boolean {
+  if (!trimmed || trimmed.startsWith("|") || isTableLine(trimmed)) return false;
+  const pipeCount = trimmed.match(/\|/g)?.length ?? 0;
+  if (pipeCount < 2) return false;
+  if (!TREE_CONNECTOR_RE.test(trimmed)) return false;
+  // Require tree-ish annotations so "A | B | C" prose does not match.
+  return /(?:←|\(\s*Agent\s*\)|\/[\w.-]+\/?)/.test(trimmed);
+}
+
+/** Split one-line tree diagrams into a fenced plain-text block for pre rendering. */
+function normalizeGluedTreeDiagrams(text: string): string {
+  return text
+    .split("\n")
+    .flatMap((line) => {
+      const trimmed = line.trim();
+      if (!isGluedTreeDiagramLine(trimmed)) return [line];
+
+      const segments = trimmed
+        .split(/\s*\|\s*/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (segments.length < 2) return [line];
+
+      return ["", "```text", ...segments, "```", ""];
+    })
+    .join("\n");
+}
+
+/** True when a line uses `| |` column glue instead of a valid GFM table row. */
+function isPipeComparisonLine(trimmed: string): boolean {
+  if (isTableLine(trimmed)) return false;
+  if (TABLE_SEPARATOR_RE.test(trimmed)) return false;
+  if (/\|[-:][-:|\s]+\|/.test(trimmed)) return false;
+  if (!/\|\s*\|/.test(trimmed)) return false;
+  const segments = trimmed
+    .split(/\s*\|\s*\|/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (segments.length < 2) return false;
+  return segments.slice(1).some((part) => /^-\s+\S/.test(part));
+}
+
+/** Turn pseudo-table tier lines ("Title | | - item | | - item") into heading + list. */
+function normalizePipeComparisonBlocks(text: string): string {
+  return text
+    .split("\n")
+    .flatMap((line) => {
+      const trimmed = line.trim();
+      if (!isPipeComparisonLine(trimmed)) return [line];
+
+      const segments = trimmed
+        .split(/\s*\|\s*\|/)
+        .map((part) => part.replace(/\s*\|\s*$/, "").trim())
+        .filter(Boolean);
+      const title = segments[0];
+      const items = segments
+        .slice(1)
+        .map((part) => `- ${part.replace(/^-\s*/, "")}`)
+        .filter((part) => part !== "-");
+
+      if (!title || items.length === 0) return [line];
+      return ["", `### ${title}`, "", ...items, ""];
+    })
+    .join("\n");
+}
+
 /**
  * Repair common LLM markdown glitches so remark-gfm can render tables and
  * headings. Scoped to prose only — code fences are never touched.
@@ -362,20 +599,25 @@ function insertMissingTableSeparators(text: string): string {
 export function normalizeAgentMarkdown(content: string): string {
   if (!content) return content;
 
-  return transformOutsideCode(content, (text) => {
-    let s = text;
+  let s = unwrapMislabeledFences(content);
+  s = closeUnclosedFences(s);
+
+  return transformOutsideCode(s, (text) => {
+    let t = wrapBareCodeBlocks(text);
+    t = normalizeGluedTreeDiagrams(t);
+    t = normalizePipeComparisonBlocks(t);
 
     // "...文字## 标题" → break before the heading marker.
-    s = s.replace(/([^\n#])(#{1,6}\s+)/g, "$1\n\n$2");
+    t = t.replace(/([^\n#])(#{1,6}\s+)/g, "$1\n\n$2");
 
     // Header row glued to its separator: "| a | b | |---|---|" → newline.
-    s = s.replace(/(\|[^|\n]+\|[^|\n]+\|[^|\n]*\|)\s*(\|[-:][-:| ]+\|)/g, "$1\n$2");
+    t = t.replace(/(\|[^|\n]+\|[^|\n]+\|[^|\n]*\|)\s*(\|[-:][-:| ]+\|)/g, "$1\n$2");
 
     // Double-pipe before a separator row: "原因 ||---|" → "原因 |\n|---|".
-    s = s.replace(/\|\s*\|(?=[-:])/g, "|\n|");
+    t = t.replace(/\|\s*\|(?=[-:])/g, "|\n|");
 
     // Blank line before a table when it immediately follows prose.
-    s = s.replace(
+    t = t.replace(
       /([^\n|][^\n]*)\n(\|[^|\n]+\|[^|\n]+\|)/g,
       (match, before: string, row: string) => {
         if (TABLE_SEPARATOR_RE.test(row.trim())) return match;
@@ -384,7 +626,7 @@ export function normalizeAgentMarkdown(content: string): string {
     );
 
     // Ensure each table row sits on its own line when rows were concatenated.
-    s = s.replace(
+    t = t.replace(
       /(\|[^|\n]+\|[^|\n]+\|[^|\n]*\|)\s+(\|[^\n]+)/g,
       (match, row: string, next: string) => {
         const nextRow = next.trim();
@@ -396,18 +638,18 @@ export function normalizeAgentMarkdown(content: string): string {
     );
 
     // "| ~5MB | | 桌面壳 |" and similar row glue on a single line.
-    s = s
+    t = t
       .split("\n")
       .flatMap((line) => splitGluedTableRowsInLine(line).split("\n"))
       .join("\n");
 
     // Blank lines between rows break GFM tables — compact before inserting separators.
-    s = compactTableBlocks(s);
+    t = compactTableBlocks(t);
 
-    s = insertMissingTableSeparators(s);
-    s = normalizeTableRowPipes(s);
+    t = insertMissingTableSeparators(t);
+    t = normalizeTableRowPipes(t);
 
-    return s;
+    return t;
   });
 }
 

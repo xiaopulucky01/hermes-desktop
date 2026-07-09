@@ -1,13 +1,13 @@
 import { execFileSync } from "child_process";
 import { join } from "path";
-import { homedir } from "os";
 import { promises as fs } from "fs";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import {
   HERMES_HOME,
-  HERMES_PYTHON,
   hermesCliArgs,
-  getEnhancedPath,
+  getHermesPythonSpawnPath,
+  buildHermesChildEnv,
+  hermesRepoAtRuntime,
 } from "./installer";
 import {
   getActiveProfileNameSync,
@@ -292,14 +292,9 @@ export function createProfile(
     : ["profile", "create", id];
 
   try {
-    execFileSync(HERMES_PYTHON, hermesCliArgs(args), {
-      cwd: join(HERMES_HOME, "hermes-agent"),
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: homedir(),
-        HERMES_HOME,
-      },
+    execFileSync(getHermesPythonSpawnPath(), hermesCliArgs(args), {
+      cwd: hermesRepoAtRuntime(),
+      env: buildHermesChildEnv(),
       stdio: "pipe",
       timeout: 30000,
       ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -337,16 +332,11 @@ export function deleteProfile(name: string): {
 
   try {
     execFileSync(
-      HERMES_PYTHON,
+      getHermesPythonSpawnPath(),
       hermesCliArgs(["profile", "delete", name, "--yes"]),
       {
-        cwd: join(HERMES_HOME, "hermes-agent"),
-        env: {
-          ...process.env,
-          PATH: getEnhancedPath(),
-          HOME: homedir(),
-          HERMES_HOME,
-        },
+        cwd: hermesRepoAtRuntime(),
+        env: buildHermesChildEnv(),
         stdio: "pipe",
         timeout: 30000,
         ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -364,14 +354,9 @@ export function setActiveProfile(name: string): void {
   }
 
   try {
-    execFileSync(HERMES_PYTHON, hermesCliArgs(["profile", "use", name]), {
-      cwd: join(HERMES_HOME, "hermes-agent"),
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: homedir(),
-        HERMES_HOME,
-      },
+    execFileSync(getHermesPythonSpawnPath(), hermesCliArgs(["profile", "use", name]), {
+      cwd: hermesRepoAtRuntime(),
+      env: buildHermesChildEnv(),
       stdio: "pipe",
       timeout: 10000,
       ...HIDDEN_SUBPROCESS_OPTIONS,

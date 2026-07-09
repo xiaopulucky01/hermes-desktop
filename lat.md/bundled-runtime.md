@@ -12,7 +12,7 @@ Set `HERMES_BUNDLED_RUNTIME=0` to force the legacy online installer path.
 
 ## Spawn executable
 
-On Windows the prepare-runtime bundle uses [[src/main/bundled-runtime.ts#resolveBundledSpawnExecutable]] to launch `python.exe` (not `pythonw.exe`) with a `realpath`-normalized path. Console flashes are suppressed by `sitecustomize.py` (`CREATE_NO_WINDOW`). [[src/main/installer.ts#buildHermesChildEnv]] sets `PYTHONPATH` to the bundled site-packages for gateway and CLI spawns.
+On Windows the prepare-runtime bundle uses [[src/main/bundled-runtime.ts#resolveBundledSpawnExecutable]] to launch `python.exe` (not `pythonw.exe`) with a `realpath`-normalized path. Console flashes are suppressed by `sitecustomize.py` (`CREATE_NO_WINDOW`). [[src/main/installer.ts#buildHermesChildEnv]] sets `PYTHONPATH` to the bundled site-packages for gateway and CLI spawns. [[src/main/installer.ts#getHermesPythonSpawnPath]] re-resolves the bundled interpreter at spawn time so a dev session started before `prepare-runtime` can recover once the bundle is installed.
 
 ## Desktop-core (optional)
 

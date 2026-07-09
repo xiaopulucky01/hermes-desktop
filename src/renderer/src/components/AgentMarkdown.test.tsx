@@ -230,4 +230,78 @@ describe("AgentMarkdown", () => {
     // Box-dominant content still renders plain regardless of the label.
     expect(declared.container.querySelector(".chat-code-plain")).not.toBeNull();
   });
+
+  it("renders markdown unwrapped from a mislabeled yaml fence as a table", () => {
+    const markdown = [
+      "```yaml",
+      "### 可发布的 Agent 类型",
+      "",
+      "| Agent 名称 | 对应方案 | 能力描述 | 目标用户 |",
+      "| **Hermes Developer** | 方案 2 | 全栈开发 | 开发者 |",
+      "```",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-table-wrap table")).not.toBeNull();
+    expect(container.textContent).toContain("Hermes Developer");
+    expect(container.querySelector(".chat-code-block")).toBeNull();
+  });
+
+  it("renders bare JavaScript as a highlighted code block", async () => {
+    const markdown = [
+      "端点示例：",
+      "app.get('/.well-known/agent.json', (req, res) => {",
+      "  res.json({ name: 'Hermes Code Developer' });",
+      "});",
+    ].join("\n");
+
+    const { container } = await renderHighlighted(markdown);
+    expect(container.querySelector(".chat-code-block")).not.toBeNull();
+    expect(container.querySelector(".chat-code-lang")?.textContent).toBe(
+      "javascript",
+    );
+  });
+
+  it("renders a yaml-labeled tree diagram as plain text, not Prism", () => {
+    const markdown = [
+      "```yaml",
+      "TypeScript 大师 (Agent)",
+      "└── SOUL.md ← 我是谁",
+      "└── skills/",
+      "    └── review/",
+      "```",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-plain")).not.toBeNull();
+    expect(container.querySelector(".token")).toBeNull();
+    expect(container.querySelector(".chat-code-lang")?.textContent).toBe("yaml");
+  });
+
+  it("renders a glued one-line tree diagram as a plain fenced block", () => {
+    const markdown =
+      'TypeScript 大师 (Agent) └── SOUL.md ← "我是谁" | "你是一个有 10 年经验的 TypeScript 架构师..." | └── skills/ ← "我会什么" | └── review/ (代码审查技能)';
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    const plain = container.querySelector(".chat-code-plain");
+    expect(plain).not.toBeNull();
+    expect(plain?.textContent).toContain('TypeScript 大师 (Agent) └── SOUL.md');
+    expect(plain?.textContent).toContain('└── skills/ ← "我会什么"');
+    expect(container.querySelector(".token")).toBeNull();
+  });
+
+  it("renders pipe-comparison tiers as headings and lists", () => {
+    const markdown = [
+      "Hermes Agent 基础功能 | | - 3 个默认角色 | | - 基础 Skills | |",
+      "↓ 升级",
+      "Hermes Code Pro ($10/月) | | - 20+ 专业角色 | | - A2A 平台发布 | |",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector("h3")?.textContent).toContain(
+      "Hermes Agent 基础功能",
+    );
+    expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(2);
+    expect(container.textContent).not.toMatch(/\|\s*\|\s*- 3 个默认角色/);
+  });
 });

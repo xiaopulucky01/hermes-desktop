@@ -51,3 +51,9 @@ The fixed heights are an invariant shared with the `.slash-menu-item` and `.slas
 Arrow-key selection does not query or measure command DOM nodes. [[src/renderer/src/screens/Chat/ChatInput.tsx]] computes the selected row's offset and adjusts the list scroll position only when that row leaves the viewport, including wraparound from the first command to the last.
 
 The searchable name and description are normalized once when the command catalog changes rather than once per command on every keystroke. The virtual canvas uses layout and paint containment, and the modal overlay avoids backdrop blur so opening the palette does not trigger a full-window blur pass.
+
+## Streaming auto-scroll stays instant
+
+While the assistant is streaming, each token chunk updates the last bubble and retriggers [[src/renderer/src/screens/Chat/hooks/useChatScroll.ts#useChatScroll]]. Smooth `scrollIntoView` on every chunk stacks competing scroll animations and makes the transcript visibly jitter.
+
+`useChatScroll` therefore snaps with `container.scrollTop = scrollHeight` for routine updates (streaming chunks, reasoning rows, tool activity) and reserves `behavior: "smooth"` only when the user just sent a message — the one case where a short eased scroll feels intentional.

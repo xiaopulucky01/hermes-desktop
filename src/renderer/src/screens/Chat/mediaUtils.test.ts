@@ -582,4 +582,79 @@ describe("normalizeAgentMarkdown", () => {
       4,
     );
   });
+
+  it("unwraps markdown tables wrongly fenced as yaml", () => {
+    const raw = [
+      "```yaml",
+      "### 可发布的 Agent 类型",
+      "",
+      "| Agent 名称 | 对应方案 | 能力描述 |",
+      "| **Hermes Developer** | 方案 2 | 全栈开发 | 开发者 |",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("```yaml");
+    expect(out).toContain("### 可发布的 Agent 类型");
+    expect(out).toContain("| Agent 名称 | 对应方案 | 能力描述 |");
+  });
+
+  it("wraps bare JavaScript in a fenced block", () => {
+    const raw = [
+      "示例端点：",
+      "app.get('/.well-known/agent.json', (req, res) => {",
+      "  res.json({ name: 'Hermes Code Developer' });",
+      "});",
+      "app.listen(3000);",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("```javascript");
+    expect(out).toContain("app.get('/.well-known/agent.json'");
+    expect(out).toMatch(/```\s*$/m);
+  });
+
+  it("closes an unclosed fence before trailing prose", () => {
+    const raw = [
+      "```javascript",
+      "const agent = new HermesAgent();",
+      "agent.run();",
+      "",
+      "上面的代码可以直接部署。",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toMatch(/```[\s\S]*上面的代码可以直接部署。/);
+    expect(out.match(/```/g)?.length).toBe(2);
+  });
+
+  it("turns pipe-comparison tier lines into heading plus bullet list", () => {
+    const raw =
+      "Hermes Agent 基础功能 | | - 3 个默认角色 | | - 基础 Skills | | 开源核心 (免费) | |";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("### Hermes Agent 基础功能");
+    expect(out).toContain("- 3 个默认角色");
+    expect(out).toContain("- 基础 Skills");
+    expect(out).not.toMatch(/\|\s*\|\s*- 3 个默认角色/);
+  });
+
+  it("leaves real yaml fenced blocks untouched", () => {
+    const raw = ["```yaml", "server:", "  port: 3000", "  host: localhost", "```"].join(
+      "\n",
+    );
+    expect(normalizeAgentMarkdown(raw)).toBe(raw);
+  });
+
+  it("splits a one-line tree diagram into a fenced plain-text block", () => {
+    const raw =
+      'TypeScript 大师 (Agent) └── SOUL.md ← "我是谁" | "你是一个有 10 年经验的 TypeScript 架构师..." | └── skills/ ← "我会什么" | └── review/ (代码审查技能) | model: claude-sonnet-4';
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("```text");
+    expect(out).toContain('TypeScript 大师 (Agent) └── SOUL.md ← "我是谁"');
+    expect(out).toContain('└── skills/ ← "我会什么"');
+    expect(out).toContain("model: claude-sonnet-4");
+    expect(out.split("\n").filter((l) => l.includes("```")).length).toBe(2);
+  });
+
+  it("does not wrap normal prose that uses single pipes", () => {
+    const raw = "Choose A | B | C for the answer.";
+    expect(normalizeAgentMarkdown(raw)).toBe(raw);
+  });
 });

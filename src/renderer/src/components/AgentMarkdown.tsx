@@ -8,7 +8,6 @@ import { describeImageSrc, normalizeAgentMarkdown } from "../screens/Chat/mediaU
 import { THEMES } from "../constants";
 import { useTheme } from "./ThemeProvider";
 import {
-  isStrongCodeLanguage,
   resolvePrismLanguage,
 } from "./prismLanguage";
 
@@ -162,10 +161,7 @@ function CodeBlock({
   // Diffs win over the box-diagram check: DiffView is already a plain per-line
   // renderer (no Prism), so it has no fragmentation risk, and a patch touching
   // a tree diagram must keep its colored +/- view.
-  const boxDiagram =
-    !isDiff &&
-    isPlainDiagram(code) &&
-    !isStrongCodeLanguage(prismLanguage);
+  const boxDiagram = !isDiff && isPlainDiagram(code);
 
   const linesCount = code.split("\n").length;
   const isLong = linesCount > 15 || code.length > 800;

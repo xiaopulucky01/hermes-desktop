@@ -16,13 +16,23 @@ Fenced blocks dominated by Unicode box-drawing characters (tree output like `├
 
 Prism fragments each glyph into nested token spans; in Electron renderers with imperfect Unicode metrics that fragmentation visually truncates or misaligns the diagram. Plain rendering also skips the lazy highlighter import and keeps the DOM to one text node. `fontVariantLigatures: "none"` and `unicodeBidi: "isolate"` guard glyph fidelity.
 
-The gate is [[src/renderer/src/components/AgentMarkdown.tsx#isPlainDiagram]]: at least half of the block's non-empty lines must contain a box-drawing glyph (U+2500–U+259F) or an ASCII diagram marker (arrows, `|___`, `----`). Density — not mere presence — is the discriminator, so one `│` in a string literal or comment does not demote a whole source file to plain text.
+The gate is [[src/renderer/src/components/AgentMarkdown.tsx#isPlainDiagram]]: at least half of the block's non-empty lines must contain a box-drawing glyph (U+2500–U+259F) or an ASCII diagram marker (arrows, `|___`, `----`). Density — not mere presence — is the discriminator, so one `│` in a string literal or comment does not demote a whole source file to plain text. The declared fence language (including `yaml`) does not override this — a mislabeled tree still renders plain so Prism cannot fragment the glyphs.
 
 Two precedence rules: `diff` blocks always keep the colored `DiffView` (it never uses Prism, so it has no fragmentation risk), and the header label keeps the fence's declared language — only an unlabeled box diagram is labeled `text`.
 
 ## LLM markdown normalization
 
-Models often glue headings, table headers, and data rows onto one line (e.g. `让我## 标题` or `| ~5MB | | 桌面壳 |`), omit the GFM separator row, or insert blank lines between rows (which breaks the table and leaves orphan `| 学习系统 | …` text). [[src/renderer/src/screens/Chat/mediaUtils.ts#normalizeAgentMarkdown]] repairs those patterns in prose only — fenced and inline code are never touched — so remark-gfm can render one contiguous table before [[src/renderer/src/components/AgentMarkdown.tsx]] parses the message. Tables are wrapped in `.chat-table-wrap` for horizontal scroll only; cell typography matches the original agent-bubble table styles. Parsed `h1`–`h4` inside `.chat-bubble-agent` inherit body `font-weight` (not semibold) so repaired headings like `### 1. …` do not look bolder than surrounding prose.
+Models often glue headings, table headers, and data rows onto one line (e.g. `让我## 标题` or `| ~5MB | | 桌面壳 |`), omit the GFM separator row, or insert blank lines between rows (which breaks the table and leaves orphan `| 学习系统 | …` text). [[src/renderer/src/screens/Chat/mediaUtils.ts#normalizeAgentMarkdown]] repairs those patterns in prose only — real fenced code is never touched — so remark-gfm can render one contiguous table before [[src/renderer/src/components/AgentMarkdown.tsx]] parses the message.
+
+Additional repair passes run before the prose-only table fixes:
+
+- **Mislabeled fences** — when a `yaml`/`json`/`text` block actually contains markdown headings and tables, the fence is stripped so remark-gfm can render the table instead of showing raw pipes inside a code block.
+- **Bare code** — consecutive lines that look like source (e.g. `app.get(…)`, `res.json(…)` without an opening fence) are wrapped in a detected-language fence so Prism can highlight them.
+- **Unclosed fences** — a missing closing ` ``` ` before trailing prose is inserted so later markdown is not swallowed as code.
+- **Glued tree diagrams** — one-line agent/skill tree output glued with `|` separators (e.g. `TypeScript 大师 (Agent) └── SOUL.md … | └── skills/ …`) is split onto separate lines and wrapped in a `text` fence so it renders in monospace `pre` instead of wrapping as prose.
+- **Pipe-comparison tiers** — product-tier lines that glue columns with `| | - item` (not valid GFM) become a `###` heading plus bullet list.
+
+Tables are wrapped in `.chat-table-wrap` for horizontal scroll only; cell typography matches the original agent-bubble table styles. Parsed `h1`–`h4` inside `.chat-bubble-agent` inherit body `font-weight` (not semibold) so repaired headings like `### 1. …` do not look bolder than surrounding prose.
 
 ## Syntax highlighting palette
 

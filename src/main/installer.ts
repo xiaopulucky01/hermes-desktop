@@ -35,9 +35,11 @@ const IS_WINDOWS = process.platform === "win32";
 let bundledLayoutCache: BundledRuntimeLayout | null | undefined;
 
 function getBundledLayout(): BundledRuntimeLayout | null {
-  if (bundledLayoutCache === undefined) {
-    bundledLayoutCache = getBundledRuntimeLayout();
-  }
+  // Re-probe until the prepare-runtime tree appears — the first import can
+  // happen before resources/python exists, and caching `null` permanently
+  // would leave CLI spawns pointed at a missing venv for the whole session.
+  if (bundledLayoutCache) return bundledLayoutCache;
+  bundledLayoutCache = getBundledRuntimeLayout();
   return bundledLayoutCache;
 }
 
@@ -237,7 +239,16 @@ export function hermesCliArgs(args: string[] = []): string[] {
 }
 
 export function isBundledEngineActive(): boolean {
-  return USE_BUNDLED_ENGINE;
+  return shouldUseBundledEngine(HERMES_HOME);
+}
+
+/** Hermes-agent repo root for CLI spawns — re-resolves bundled vs traditional. */
+export function hermesRepoAtRuntime(): string {
+  const layout = getBundledLayout();
+  if (shouldUseBundledEngine(HERMES_HOME) && layout) {
+    return layout.root;
+  }
+  return join(HERMES_HOME, "hermes-agent");
 }
 
 export function hermesSkillsDir(): string {
@@ -262,15 +273,15 @@ export function hermesWebDistDir(): string {
 
 export function hermesPythonSourceRoot(): string {
   const layout = getBundledLayout();
-  if (USE_BUNDLED_ENGINE && layout) {
+  if (shouldUseBundledEngine(HERMES_HOME) && layout) {
     return layout.sitePackages;
   }
-  return HERMES_REPO;
+  return join(HERMES_HOME, "hermes-agent");
 }
 
 export function getBundledSpawnEnv(): Record<string, string> {
   const layout = getBundledLayout();
-  if (USE_BUNDLED_ENGINE && layout) {
+  if (shouldUseBundledEngine(HERMES_HOME) && layout) {
     return bundledRuntimeEnv(layout);
   }
   return {};
@@ -305,10 +316,30 @@ export function buildHermesChildEnv(
 /** Re-resolve the bundled interpreter path immediately before spawn. */
 export function getHermesPythonSpawnPath(): string {
   const layout = getBundledLayout();
-  if (USE_BUNDLED_ENGINE && layout && IS_WINDOWS) {
-    return resolveBundledSpawnExecutable(layout.root);
+  if (shouldUseBundledEngine(HERMES_HOME) && layout) {
+    return IS_WINDOWS
+      ? resolveBundledSpawnExecutable(layout.root)
+      : join(layout.root, "bin", "python3");
   }
   return HERMES_PYTHON;
+}
+
+/** Actionable error when the Hermes CLI interpreter cannot be spawned. */
+export function getHermesCliSpawnError(): string | null {
+  const pythonPath = getHermesPythonSpawnPath();
+  if (!existsSync(pythonPath)) {
+    if (shouldUseBundledEngine(HERMES_HOME)) {
+      return (
+        `Bundled Python interpreter not found at ${pythonPath}. ` +
+        "Run `npm run prepare-runtime` in the project root, then restart the app."
+      );
+    }
+    return (
+      `Hermes Python interpreter not found at ${pythonPath}. ` +
+      "Install or repair Hermes Agent, then try again."
+    );
+  }
+  return null;
 }
 
 /** Turn spawn ENOENT into an actionable message for the bundled dev runtime. */
@@ -318,7 +349,7 @@ export function formatHermesSpawnError(
   attemptedPath: string,
 ): string {
   if (err.code === "ENOENT") {
-    if (USE_BUNDLED_ENGINE) {
+    if (shouldUseBundledEngine(HERMES_HOME)) {
       return (
         `Bundled Python interpreter not found at ${attemptedPath}. ` +
         "Run `npm run prepare-runtime` in the project root, then restart the app."
@@ -333,9 +364,9 @@ export function formatHermesSpawnError(
 }
 
 function canInvokeHermesCli(): boolean {
-  if (!existsSync(HERMES_PYTHON)) return false;
+  if (!existsSync(getHermesPythonSpawnPath())) return false;
   const layout = getBundledLayout();
-  if (USE_BUNDLED_ENGINE && layout) {
+  if (shouldUseBundledEngine(HERMES_HOME) && layout) {
     return existsSync(
       join(layout.sitePackages, "hermes_cli", "main.py"),
     );

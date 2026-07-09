@@ -1,11 +1,16 @@
 import { execFile, ExecFileOptions } from "child_process";
+import { existsSync } from "fs";
 import { join } from "path";
 import {
   HERMES_HOME,
-  HERMES_PYTHON,
   hermesCliArgs,
-  getEnhancedPath,
+  getHermesPythonSpawnPath,
+  getHermesCliSpawnError,
+  buildHermesChildEnv,
+  formatHermesSpawnError,
+  hermesRepoAtRuntime,
 } from "./installer";
+import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { isRemoteOnlyMode } from "./hermes";
 import { getConnectionConfig } from "./config";
 import { sshRunKanban, sshListClaw3dHqTasks } from "./ssh-remote";
@@ -99,6 +104,25 @@ export interface KanbanResult<T = unknown> {
 
 const KANBAN_TIMEOUT_MS = 20000;
 
+function parseKanbanJson(stdout: string): unknown {
+  const trimmed = stdout.trim().replace(/^\uFEFF/, "");
+  return JSON.parse(trimmed);
+}
+
+/** Named profiles must exist on disk before `-p` is passed to the CLI. */
+// @lat: [[kanban#Kanban board tab]]
+export function validateLocalKanbanProfile(profile?: string): string | null {
+  if (!profile || profile === "default") return null;
+  const profileDir = join(HERMES_HOME, "profiles", profile);
+  if (!existsSync(profileDir)) {
+    return (
+      `Profile '${profile}' was not found at ${profileDir}. ` +
+      "Create it in Agents (工作区), or switch to the default profile."
+    );
+  }
+  return null;
+}
+
 interface RunOpts {
   profile?: string;
   parseJson?: boolean;
@@ -109,6 +133,7 @@ async function runKanban(
   args: string[],
   opts: RunOpts = {},
 ): Promise<KanbanResult<unknown>> {
+  // @lat: [[kanban#Kanban board tab]]
   // SSH tunnel mode: dispatch to the remote Hermes CLI over SSH.
   const conn = getConnectionConfig();
   if (conn.mode === "ssh" && conn.ssh) {
@@ -125,27 +150,48 @@ async function runKanban(
   }
   cliArgs.push("kanban", ...args);
 
+  const profileError = validateLocalKanbanProfile(opts.profile);
+  if (profileError) {
+    return { success: false, error: profileError };
+  }
+
+  const spawnError = getHermesCliSpawnError();
+  if (spawnError) {
+    return { success: false, error: spawnError };
+  }
+
+  const pythonPath = getHermesPythonSpawnPath();
   const execOpts: ExecFileOptions = {
-    cwd: join(HERMES_HOME, "hermes-agent"),
+    cwd: hermesRepoAtRuntime(),
     timeout: opts.timeoutMs ?? KANBAN_TIMEOUT_MS,
-    env: { ...process.env, PATH: getEnhancedPath() },
+    env: buildHermesChildEnv(),
     maxBuffer: 16 * 1024 * 1024,
+    ...HIDDEN_SUBPROCESS_OPTIONS,
   };
 
   return new Promise((resolve) => {
-    execFile(HERMES_PYTHON, cliArgs, execOpts, (err, stdout, stderr) => {
+    execFile(pythonPath, cliArgs, execOpts, (err, stdout, stderr) => {
       const out = (stdout || "").toString();
       if (err) {
+        const stderrText = (stderr || "").toString().trim();
+        const error =
+          err.code === "ENOENT"
+            ? formatHermesSpawnError(err, pythonPath)
+            : stderrText || err.message;
         resolve({
           success: false,
-          error: (stderr || err.message || "").toString().trim(),
+          error,
           stdout: out,
         });
         return;
       }
       if (opts.parseJson) {
         try {
-          resolve({ success: true, data: JSON.parse(out), stdout: out });
+          resolve({
+            success: true,
+            data: parseKanbanJson(out),
+            stdout: out,
+          });
         } catch (parseErr) {
           resolve({
             success: false,

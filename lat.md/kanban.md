@@ -2,7 +2,7 @@
 
 The Kanban tab ([[src/renderer/src/screens/Kanban/Kanban.tsx]]) is a JIRA-style board for the hermes-agent multi-agent task queue, presented as "JIRA for AI agents": named agent profiles pick up cards, run them, and hand off through the durable `~/.hermes/kanban.db`.
 
-It is a **thin client over the `hermes kanban` CLI** — every read and mutation shells out through [[src/main/kanban.ts]] (local exec, or SSH-tunnelled via `sshRunKanban` when in tunnel mode). Plain remote HTTP mode is unsupported and shows a "switch modes" notice. The renderer holds no domain logic; it renders board state and routes actions to the CLI.
+It is a **thin client over the `hermes kanban` CLI** — every read and mutation shells out through [[src/main/kanban.ts#runKanban]] (local exec, or SSH-tunnelled via `sshRunKanban` when in tunnel mode). Local spawns use [[src/main/installer.ts#getHermesPythonSpawnPath]], [[src/main/installer.ts#hermesRepoAtRuntime]], and [[src/main/installer.ts#buildHermesChildEnv]] so the bundled `resources/python` tree works without a separate `hermes-agent` clone; a missing interpreter surfaces `npm run prepare-runtime` instead of a raw ENOENT. [[src/main/kanban.ts#validateLocalKanbanProfile]] rejects unknown `-p` profiles before spawn so create/list fail with an Agents-screen hint instead of an opaque CLI error. Plain remote HTTP mode is unsupported and shows a "switch modes" notice. The renderer holds no domain logic; it renders board state and routes actions to the CLI.
 
 ## Statuses and columns
 

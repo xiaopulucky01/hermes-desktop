@@ -8,6 +8,7 @@ import type { ChatMessage } from "../types";
  * - Re-engages auto-scroll when a new user message is sent.
  * - Exposes the container ref and a bottom sentinel ref to be placed in JSX.
  */
+// @lat: [[chat-performance#Streaming auto-scroll stays instant]]
 export function useChatScroll(messages: ChatMessage[]): {
   containerRef: React.RefObject<HTMLDivElement | null>;
   bottomRef: React.RefObject<HTMLDivElement | null>;
@@ -17,10 +18,21 @@ export function useChatScroll(messages: ChatMessage[]): {
   const userScrolledUpRef = useRef(false);
   const prevMessageCountRef = useRef(messages.length);
 
-  const scrollToBottom = useCallback((force?: boolean) => {
-    if (!force && userScrolledUpRef.current) return;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
+  const scrollToBottom = useCallback(
+    (options?: { force?: boolean; behavior?: ScrollBehavior }) => {
+      if (!options?.force && userScrolledUpRef.current) return;
+      const container = containerRef.current;
+      if (!container) return;
+      // Instant scroll during streaming — smooth scroll on every chunk stacks
+      // competing animations and makes the transcript jitter.
+      if (options?.behavior === "smooth") {
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+      container.scrollTop = container.scrollHeight;
+    },
+    [],
+  );
 
   // Track manual scroll position
   useEffect(() => {
@@ -44,7 +56,7 @@ export function useChatScroll(messages: ChatMessage[]): {
       messages[messages.length - 1]?.role === "user";
     if (userJustSent) {
       userScrolledUpRef.current = false;
-      scrollToBottom(true);
+      scrollToBottom({ force: true, behavior: "smooth" });
     } else {
       scrollToBottom();
     }
