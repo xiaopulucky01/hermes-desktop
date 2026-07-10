@@ -32,14 +32,17 @@ Models often glue headings, table headers, and data rows onto one line (e.g. `�
 
 Additional repair passes run before the prose-only table fixes:
 
-- **Mislabeled fences** — when a `yaml`/`json`/`text` block actually contains markdown headings and tables, the fence is stripped so remark-gfm can render the table instead of showing raw pipes inside a code block.
+- **Mislabeled fences** — when a `yaml`/`json`/`text` block actually contains markdown headings, bold markers (`**`), pipe-prefixed pseudo-list rows (`|- item`, `| | item`), or tables, the fence is stripped so remark-gfm can render the table instead of showing raw pipes inside a code block. Box diagrams inside `text` fences are left fenced.
+- **Broken bold** — bold markers split across lines (`**标题` + `正文**`) are merged, and dangling `**` on a row are closed so later emphasis parses correctly.
+- **Glued headings** — `###标题` (no space after hashes) is broken onto its own line with a space inserted before the title text.
+- **Pipe-prefixed lists** — single-column rows the model prefixed with `|`, `|-`, or `| |` become markdown bullets. Glued GFM tables (`||` row boundaries, 3+ pipes) are left for the table repair passes.
 - **Bare code** — consecutive lines that look like source (e.g. `app.get(…)`, `res.json(…)` without an opening fence) are wrapped in a detected-language fence so Prism can highlight them.
 - **Unclosed fences** — a missing closing ` ``` ` before trailing prose is inserted so later markdown is not swallowed as code.
 - **Glued tree diagrams** — one-line agent/skill tree output glued with `|` separators (e.g. `TypeScript 大师 (Agent) └── SOUL.md … | └── skills/ …`) is split onto separate lines and wrapped in a `text` fence so it renders in monospace `pre` instead of wrapping as prose.
 - **Bare layer diagrams** — multi-line MCP/A2A stack diagrams with bracket labels, vertical connectors, and agent arrows but no opening fence are wrapped in a `text` fence so they align in monospace `pre`.
 - **Pipe-comparison tiers** — product-tier lines that glue columns with `| | - item` (not valid GFM) become a `###` heading plus bullet list.
 
-Tables are wrapped in `.chat-table-wrap` for horizontal scroll only; cell typography matches the original agent-bubble table styles. Parsed `h1`–`h4` inside `.chat-bubble-agent` inherit body `font-weight` (not semibold) so repaired headings like `### 1. …` do not look bolder than surrounding prose.
+Tables are wrapped in `.chat-table-wrap` for horizontal scroll only; cell typography matches the original agent-bubble table styles. Parsed `h1`–`h4` inside `.chat-bubble-agent` inherit body `font-weight` (not semibold) so repaired headings like `### 1. …` do not look bolder than surrounding prose. `strong` / `b` use `font-weight: 600` so Tailwind preflight does not make emphasis invisible.
 
 ## Syntax highlighting palette
 

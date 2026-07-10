@@ -682,18 +682,26 @@ function isMarkdownListLine(trimmed: string): boolean {
 function fenceContentIsMarkdown(body: string, lang: string): boolean {
   const trimmed = body.trim();
   if (!trimmed || !MISLABELED_FENCE_LANGS.has(lang)) return false;
+  if (isPlainDiagram(trimmed)) return false;
 
   const lines = trimmed.split("\n").filter((line) => line.trim() !== "");
   const tableRows = lines.filter((line) => isTableLine(line.trim())).length;
   const listLines = lines.filter((line) => isMarkdownListLine(line.trim())).length;
   const hasMarkdownHeader = /^#{1,6}\s+\S/m.test(trimmed);
+  const hasGluedHeader = /#{1,6}(?=[\u4e00-\u9fffA-Za-z])/m.test(trimmed);
   const hasMarkdownBold = /\*\*[^*]+\*\*/.test(trimmed);
+  const hasBoldMarkers = /\*\*/.test(trimmed);
+  const hasPipePrefixedProse = lines.some((line) =>
+    /^\|\s*(?:-\s|\|\s*\S)/.test(line.trim()),
+  );
 
   if (hasMarkdownHeader && tableRows >= 1) return true;
-  if (tableRows >= 2 && (hasMarkdownHeader || hasMarkdownBold)) return true;
+  if (tableRows >= 2 && (hasMarkdownHeader || hasMarkdownBold || hasBoldMarkers)) {
+    return true;
+  }
   if (lines.length >= 2 && tableRows * 2 >= lines.length) return true;
-  // Numbered/bullet lists with bold labels — e.g. `1. **记忆** → …`
-  if (listLines >= 2 && listLines === lines.length && hasMarkdownBold) return true;
+  if (listLines >= 2 && listLines === lines.length && hasBoldMarkers) return true;
+  if (hasBoldMarkers || hasGluedHeader || hasPipePrefixedProse) return true;
   return false;
 }
 
@@ -1037,6 +1045,58 @@ function isPipeComparisonLine(trimmed: string): boolean {
   return segments.slice(1).some((part) => /^-\s+\S/.test(part));
 }
 
+/** Turn pipe-prefixed pseudo-list rows (`|- item`, `| | item`) into markdown bullets. */
+function normalizePipePrefixedListLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("|")) return line;
+      if (trimmed.includes("||")) return line;
+      if (isTableLine(trimmed) || looksLikeGluedTableLine(trimmed)) return line;
+      if ((trimmed.match(/\|/g)?.length ?? 0) >= 3) return line;
+      const leading = line.match(/^\s*/)?.[0] ?? "";
+      if (/^\|\s*-\s*/.test(trimmed)) {
+        return `${leading}${trimmed.replace(/^\|\s*-\s*/, "- ")}`;
+      }
+      if (/^\|\s*\|\s*\S/.test(trimmed)) {
+        return `${leading}${trimmed.replace(/^\|\s*\|\s*/, "- ")}`;
+      }
+      if (/^\|\s+\S/.test(trimmed) && !TABLE_ROW_RE.test(trimmed)) {
+        return `${leading}${trimmed.replace(/^\|\s+/, "- ")}`;
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+/** Merge bold markers split across lines and close dangling `**` on a row. */
+function repairBrokenBoldMarkers(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    const asteriskRuns = (line.match(/\*\*/g) || []).length;
+    if (
+      asteriskRuns % 2 === 1 &&
+      !line.trimEnd().endsWith("**") &&
+      i + 1 < lines.length
+    ) {
+      const nextTrimmed = lines[i + 1].trim();
+      if (nextTrimmed && !nextTrimmed.startsWith("**")) {
+        line = `${line.trimEnd()}${nextTrimmed}`;
+        i++;
+      }
+    }
+    const finalRuns = (line.match(/\*\*/g) || []).length;
+    if (finalRuns % 2 === 1) line = `${line}**`;
+    out.push(line);
+  }
+
+  return out.join("\n");
+}
+
 /** Turn pseudo-table tier lines ("Title | | - item | | - item") into heading + list. */
 function normalizePipeComparisonBlocks(text: string): string {
   return text
@@ -1073,10 +1133,12 @@ export function normalizeAgentMarkdown(content: string): string {
   s = closeUnclosedFences(s);
 
   return transformOutsideCode(s, (text) => {
-    let t = normalizeGluedTreeDiagrams(text);
+    let t = repairBrokenBoldMarkers(text);
+    t = normalizeGluedTreeDiagrams(t);
     t = wrapBareDiagramBlocks(t);
     t = wrapBareCodeBlocks(t);
     t = normalizePipeComparisonBlocks(t);
+    t = normalizePipePrefixedListLines(t);
 
     // Expand glued dash separators (`||---|---|---| ||`) before other pipe fixes.
     t = t
@@ -1086,6 +1148,11 @@ export function normalizeAgentMarkdown(content: string): string {
 
     // "...文字## 标题" → break before the heading marker.
     t = t.replace(/([^\n#])(#{1,6}\s+)/g, "$1\n\n$2");
+    // "...查询###海量" → break and insert a space after glued hashes.
+    t = t.replace(
+      /([^\n#])(#{1,6})(?=[\u4e00-\u9fffA-Za-z])/g,
+      "$1\n\n$2 ",
+    );
 
     // Header row glued to its separator: "| a | b | |---|---|" → newline.
     t = t.replace(/(\|[^|\n]+\|[^|\n]+\|[^|\n]*\|)\s*(\|[-:][-:| ]+\|)/g, "$1\n$2");

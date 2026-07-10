@@ -786,4 +786,24 @@ describe("normalizeAgentMarkdown", () => {
     expect(out).toContain("**记忆**");
     expect(out).toContain("**技能**");
   });
+
+  it("unwraps a text fence with pipe-prefixed pseudo-list lines", () => {
+    const raw = [
+      "```text",
+      "|- 生效**, 不需要额外下",
+      "| 比如你下 存了\"用户项目用 pytest\" 环境配置",
+      "| | 核心查询。如果换成 GBrain",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("```text");
+    expect(out).toContain("- 生效**");
+    expect(out).not.toContain("|- 生效");
+  });
+
+  it("breaks glued headings without a space after hashes", () => {
+    const raw = "为什么不能完全1. **Hermes Memory 的核心价值查询###海量、长期、需要";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toMatch(/###\s+海量/);
+  });
 });

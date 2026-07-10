@@ -4493,6 +4493,11 @@ body {
   font-size: 14px;
 }
 
+.chat-bubble-agent strong,
+.chat-bubble-agent b {
+  font-weight: 600;
+}
+
 .chat-bubble-agent blockquote {
   border-left: 3px solid var(--border-bright);
   margin: 4px 0;

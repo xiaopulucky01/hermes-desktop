@@ -1,6 +1,7 @@
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { normalizeAgentMarkdown } from "../screens/Chat/mediaUtils";
 
 vi.mock("./useI18n", () => ({
   useI18n: () => ({
@@ -407,5 +408,29 @@ describe("AgentMarkdown", () => {
     expect(container.querySelectorAll("strong").length).toBeGreaterThanOrEqual(3);
     expect(container.textContent).toContain("记忆");
     expect(container.textContent).not.toContain("**记忆**");
+  });
+
+  it("unwraps a text fence with pipe-prefixed pseudo-list lines", () => {
+    const markdown = [
+      "```text",
+      "|- 生效**, 不需要额外下",
+      "| 比如你下 存了\"用户项目用 pytest\" 环境配置",
+      "| | 核心查询。如果换成 GBrain",
+      "```",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-block")).toBeNull();
+    expect(container.textContent).not.toContain("|- 生效");
+    expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("breaks glued headings without a space after hashes", () => {
+    const markdown = normalizeAgentMarkdown(
+      "为什么不能完全1. **Hermes Memory 的核心价值查询###海量、长期、需要",
+    );
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector("h3")).not.toBeNull();
+    expect(container.textContent).toContain("海量");
   });
 });
