@@ -274,7 +274,7 @@ function pipInstall() {
   log("installing hermes-agent");
   // PyPI release. Swap to a local path if you need to ship an unreleased
   // hermes-agent build:  [PYTHON_EXE, "-m", "pip", "install", "C:/Users/MI/.hermes/hermes-agent"]
-  run(PYTHON_EXE, ["-m", "pip", "install", "hermes-agent"]);
+  run(PYTHON_EXE, ["-m", "pip", "install", "hermes-agent[acp]"]);
 
   if (desktopCoreConfigured()) {
     log(`installing core from ${DESKTOP_CORE}`);

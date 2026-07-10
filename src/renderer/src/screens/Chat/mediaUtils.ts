@@ -856,6 +856,158 @@ function normalizeGluedTreeDiagrams(text: string): string {
     .join("\n");
 }
 
+// Box Drawing (U+2500–U+257F) plus Block Elements (U+2580–U+259F).
+const BOX_DRAWING_RE = /[\u2500-\u259F]/;
+
+// Arrows, repeated pipes/underscores, em-dash connectors.
+const ASCII_DIAGRAM_RE =
+  /(?:[|_]{3,}|[-=~─—]{4,}|[→←↑↓↔↕⟶⟵▶▷►]|[-─—]{2,}\s*[>→]|(?:→|←)\s*Agent\s+[A-Z]\b|Agent\s+[A-Z]\b.*(?:→|←|─|—|委托|协作))/;
+
+// Layer-stack triangles and bracket labels like [A2A 层] / [Agent A].
+const LAYER_DIAGRAM_RE =
+  /[\u25BC-\u25BF\u25B2-\u25B5]|^\s*\[(?:Agent\s+[A-Z]|[^\]]*(?:层|Layer))\]\s*$|\[[^\]]+\].*(?:→|←|↓|↑|─|—|│|\||▼|▲)|^\s*[|│]\s*$|\+[-=+]+\+/;
+
+const LAYER_MARKER_RE = new RegExp(
+  String.raw`[\u25BC-\u25BF\u25B2-\u25B5]|^\[(?:Agent\s+[A-Z]|[^\]]*(?:层|Layer))\]$|[\u250c\u2510\u2514\u2518\u251c\u2524\u2534\u252c]|^\s*\+[-=+]+\+\s*$`,
+  "i",
+);
+
+function looksLikeGluedTableLine(trimmed: string): boolean {
+  if (isTableLine(trimmed)) return true;
+  return (
+    /[^|]+\|[^|]+\|/.test(trimmed) &&
+    /\|\s*[-:][-:|\s]+\|/.test(trimmed)
+  );
+}
+
+/** True when a line carries box-drawing, flowchart, or layer-stack diagram glyphs. */
+export function isDiagramLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || isTableLine(trimmed) || looksLikeGluedTableLine(trimmed)) {
+    return false;
+  }
+  if (/^```/.test(trimmed)) return false;
+  return (
+    BOX_DRAWING_RE.test(line) ||
+    ASCII_DIAGRAM_RE.test(line) ||
+    LAYER_DIAGRAM_RE.test(trimmed)
+  );
+}
+
+// A fenced block is a diagram when diagram glyphs dominate, or when layer
+// markers (brackets, triangles, box borders) appear alongside any diagram line.
+// @lat: [[code-blocks#Box diagrams render plain, not highlighted]]
+export function isPlainDiagram(code: string): boolean {
+  const lines = code.split("\n").filter((line) => line.trim() !== "");
+  if (lines.length === 0) return false;
+
+  const diagramLines = lines.filter((line) => isDiagramLine(line)).length;
+  const hasLayerMarker = lines.some((line) => LAYER_MARKER_RE.test(line.trim()));
+
+  if (hasLayerMarker && diagramLines >= 1) return true;
+  if (diagramLines >= 2) return true;
+  return diagramLines * 2 >= lines.length;
+}
+
+/** Short caption/label line that may sit inside a bare ASCII diagram block. */
+function isDiagramContinuationLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (isDiagramLine(trimmed)) return true;
+  if (looksLikeCodeLine(line)) return false;
+  if (isTableLine(trimmed)) return false;
+  if (isPipeComparisonLine(trimmed)) return false;
+  if (/^```/.test(trimmed)) return false;
+  if (/^#{1,6}\s/.test(trimmed)) return false;
+  if (/^[-*+]\s/.test(trimmed)) return false;
+  if (/^>\s/.test(trimmed)) return false;
+  if (trimmed.length > 72 || /[.!?。！？]$/.test(trimmed)) return false;
+  return /(?:层|Agent|MCP|A2A|工具|数据|委托|协作|互补|竞争)/i.test(trimmed);
+}
+
+function qualifiesAsDiagramBlock(blockLines: string[]): boolean {
+  const nonBlank = blockLines.filter((line) => line.trim() !== "");
+  if (nonBlank.length === 0) return false;
+
+  const diagramCount = nonBlank.filter((line) => isDiagramLine(line)).length;
+  const hasLayerMarker = nonBlank.some((line) =>
+    LAYER_MARKER_RE.test(line.trim()),
+  );
+
+  if (hasLayerMarker && diagramCount >= 1) return true;
+  if (diagramCount >= 2) return true;
+  if (
+    diagramCount >= 1 &&
+    nonBlank.length <= 10 &&
+    nonBlank.every(
+      (line) =>
+        isDiagramLine(line) || isDiagramContinuationLine(line),
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Wrap bare multi-line layer/flow diagrams in a `text` fence for monospace pre. */
+function wrapBareDiagramBlocks(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  let inFence = false;
+
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    if (/^```/.test(trimmed)) {
+      inFence = !inFence;
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+    if (inFence) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    if (!isDiagramLine(lines[i])) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    const start = i;
+    while (i < lines.length) {
+      const trimmed = lines[i].trim();
+      if (trimmed === "") {
+        const next = nextNonBlankLine(lines, i + 1);
+        if (
+          next &&
+          (isDiagramLine(next) || isDiagramContinuationLine(next))
+        ) {
+          out.push(lines[i]);
+          i++;
+          continue;
+        }
+        break;
+      }
+      if (!isDiagramLine(lines[i]) && !isDiagramContinuationLine(lines[i])) {
+        break;
+      }
+      i++;
+    }
+
+    const blockLines = lines.slice(start, i);
+    if (qualifiesAsDiagramBlock(blockLines)) {
+      out.push("", "```text", ...blockLines, "```", "");
+    } else {
+      out.push(...blockLines);
+    }
+  }
+
+  return out.join("\n");
+}
+
 /** True when a line uses `| |` column glue instead of a valid GFM table row. */
 function isPipeComparisonLine(trimmed: string): boolean {
   if (isTableLine(trimmed)) return false;
@@ -906,8 +1058,9 @@ export function normalizeAgentMarkdown(content: string): string {
   s = closeUnclosedFences(s);
 
   return transformOutsideCode(s, (text) => {
-    let t = wrapBareCodeBlocks(text);
-    t = normalizeGluedTreeDiagrams(t);
+    let t = normalizeGluedTreeDiagrams(text);
+    t = wrapBareDiagramBlocks(t);
+    t = wrapBareCodeBlocks(t);
     t = normalizePipeComparisonBlocks(t);
 
     // Expand glued dash separators (`||---|---|---| ||`) before other pipe fixes.

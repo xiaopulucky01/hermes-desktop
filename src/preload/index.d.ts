@@ -30,6 +30,7 @@ import type {
 } from "../shared/messaging-platforms";
 import type { ChatToolEvent } from "../shared/chat-stream";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
+import type { AcpLaunchInfo } from "../shared/acp";
 
 interface ElectronAPI {
   process: {
@@ -238,6 +239,9 @@ interface HermesAPI {
   reenableGpu: () => Promise<boolean>;
   setGpuPreference: (mode: GpuPreferenceMode) => Promise<boolean>;
   relaunchApp: () => Promise<void>;
+
+  getAcpLaunchInfo: () => Promise<AcpLaunchInfo>;
+  installAcpExtra: () => Promise<{ ok: boolean; message: string }>;
   onInstallProgress: (
     callback: (progress: InstallProgress) => void,
   ) => () => void;

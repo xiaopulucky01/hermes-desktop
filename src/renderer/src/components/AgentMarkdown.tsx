@@ -4,7 +4,11 @@ import remarkGfm from "remark-gfm";
 import { Copy } from "lucide-react";
 import { useI18n } from "./useI18n";
 import { MediaImage, DownloadChip } from "./MediaImage";
-import { describeImageSrc, normalizeAgentMarkdown } from "../screens/Chat/mediaUtils";
+import {
+  describeImageSrc,
+  isPlainDiagram,
+  normalizeAgentMarkdown,
+} from "../screens/Chat/mediaUtils";
 import { THEMES } from "../constants";
 import { useTheme } from "./ThemeProvider";
 import {
@@ -53,30 +57,6 @@ function loadHighlighter(appearance: "light" | "dark"): Promise<void> {
 
 function prismStyleFor(appearance: "light" | "dark"): Record<string, React.CSSProperties> | null {
   return appearance === "light" ? _prismStyleLight : _prismStyleDark;
-}
-
-// Box Drawing (U+2500–U+257F) plus Block Elements (U+2580–U+259F): tree
-// connectors like ├─ └─ │ and the shading/progress-bar glyphs █ ░ ▒ ▓.
-const BOX_DRAWING_RE = /[\u2500-\u259F]/;
-
-// ASCII flowcharts the model often emits inside unlabeled fences: arrows,
-// repeated pipes/underscores, comparison columns. Prism tokenizes these
-// into per-glyph spans that Electron misaligns, so they render as plain text.
-const ASCII_DIAGRAM_RE =
-  /(?:[|_]{3,}|[-=~]{4,}|[→←↑↓↔↕⟶⟵▶▷►])/;
-
-function isDiagramLine(line: string): boolean {
-  return BOX_DRAWING_RE.test(line) || ASCII_DIAGRAM_RE.test(line);
-}
-
-// A block is a diagram (tree output, flowchart, table borders) when diagram
-// characters dominate it — at least half of its non-empty lines contain one.
-// @lat: [[code-blocks#Box diagrams render plain, not highlighted]]
-function isPlainDiagram(code: string): boolean {
-  const lines = code.split("\n").filter((line) => line.trim() !== "");
-  if (lines.length === 0) return false;
-  const diagramLines = lines.filter(isDiagramLine).length;
-  return diagramLines * 2 >= lines.length;
 }
 
 const PLAIN_PRE_STYLE: React.CSSProperties = {

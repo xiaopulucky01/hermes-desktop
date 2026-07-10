@@ -394,6 +394,12 @@ function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+/** First markdown heading line, if any — used to spot full-document rewrites. */
+function primaryHeading(text: string): string | null {
+  const match = text.match(/^#{1,6}\s+.+$/m);
+  return match ? normalizeText(match[0]) : null;
+}
+
 /**
  * Length of the longest suffix of `a` that is also a prefix of `b`, used to
  * stitch a re-streamed boundary without duplicating the shared run. The
@@ -448,6 +454,7 @@ function tailHeadOverlap(a: string, b: string): number {
  *   - streamed ⊇ final → streamed (keeps the pre-tool-call text)
  *   - tail/head overlap → stitch, dropping the duplicated seam
  *   - shared long prefix → final (model re-sent a revised full answer)
+ *   - same top heading + shared body prefix → final (garbled stream rewrite)
  *   - otherwise        → concatenate with a blank-line separator so the two
  *                        segments don't run together ("check.It's" / "4answer")
  *
@@ -481,6 +488,22 @@ export function mergeStreamedWithFinal(
     shorterNorm >= 400 &&
     sharedPrefix >= 100 &&
     sharedPrefix / shorterNorm >= 0.12
+  ) {
+    return finalContent;
+  }
+
+  // Garbled streaming can diverge early enough to miss the prefix ratio above
+  // while still being the same document as the clean final (same top-level
+  // heading, comparable length). Prefer the final in that case rather than
+  // stacking two near-complete copies.
+  const streamedHeading = primaryHeading(streamedContent);
+  const finalHeading = primaryHeading(finalContent);
+  if (
+    streamedHeading &&
+    streamedHeading === finalHeading &&
+    shorterNorm >= 200 &&
+    sharedPrefix >= 40 &&
+    finalContent.length >= streamedContent.length * 0.75
   ) {
     return finalContent;
   }

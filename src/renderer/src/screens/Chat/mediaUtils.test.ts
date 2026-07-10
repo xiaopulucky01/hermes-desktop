@@ -716,4 +716,28 @@ describe("normalizeAgentMarkdown", () => {
     expect(out).not.toContain("||");
     expect(out.split("\n").some((line) => line.trim() === "|")).toBe(false);
   });
+
+  // @lat: [[code-blocks#Bare layer diagrams wrap in text fences]]
+  it("wraps a bare MCP/A2A layer diagram in a text fence", () => {
+    const raw = [
+      "它们是互补而非竞争的",
+      "",
+      "[A2A 层]",
+      "    |",
+      "Agent A ──委托──> Agent B",
+      "    |",
+      "[MCP 层]",
+      "工具/数据",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("```text");
+    expect(out).toContain("[A2A 层]");
+    expect(out).toContain("Agent A ──委托──> Agent B");
+    expect(out).toContain("工具/数据");
+  });
+
+  it("does not wrap a normal prose sentence about MCP and A2A", () => {
+    const raw = "MCP 与 A2A 是互补的协议，分别解决不同层的问题。";
+    expect(normalizeAgentMarkdown(raw)).toBe(raw);
+  });
 });

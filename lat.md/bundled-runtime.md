@@ -1,6 +1,6 @@
 # Bundled runtime
 
-Windows installers ship a self-contained Python runtime under `resources/python/` prepared by `npm run prepare-runtime` (see `scripts/prepare-runtime.mjs`).
+Windows installers ship a self-contained Python runtime under `resources/python/` prepared by `npm run prepare-runtime` (see `scripts/prepare-runtime.mjs`). The bundle installs `hermes-agent[acp]` so IDE integration works out of the box.
 
 ## Bundled engine detection
 

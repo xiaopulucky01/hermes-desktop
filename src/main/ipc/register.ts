@@ -51,6 +51,7 @@ import {
   setGpuPreference,
   relaunchApp,
 } from "../gpu-fallback";
+import { getAcpLaunchInfo, installAcpExtra } from "../acp";
 import type { GpuPreferenceMode } from "../../shared/gpu";
 import {
   checkInstallStatus,
@@ -666,6 +667,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     return setGpuPreference(mode);
   });
   ipcMain.handle("relaunch-app", () => relaunchApp());
+
+  // ACP (Agent Client Protocol) — IDE integration via stdio JSON-RPC.
+  ipcMain.handle("get-acp-launch-info", () => getAcpLaunchInfo());
+  ipcMain.handle("install-acp-extra", () => installAcpExtra());
 
   // Hermes engine info
   ipcMain.handle("get-hermes-version", async () => {

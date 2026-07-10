@@ -24,6 +24,7 @@ import type {
 } from "../shared/account";
 import type { AgentSyncResult, AgentSyncStatus } from "../shared/agent-sync";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
+import type { AcpLaunchInfo } from "../shared/acp";
 
 /**
  * Mirror of the renderer-side `CredentialPoolEntry` ambient type
@@ -119,6 +120,12 @@ const hermesAPI = {
     ipcRenderer.invoke("set-gpu-preference", mode),
 
   relaunchApp: (): Promise<void> => ipcRenderer.invoke("relaunch-app"),
+
+  getAcpLaunchInfo: (): Promise<AcpLaunchInfo> =>
+    ipcRenderer.invoke("get-acp-launch-info"),
+
+  installAcpExtra: (): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke("install-acp-extra"),
 
   onInstallProgress: (
     callback: (progress: {

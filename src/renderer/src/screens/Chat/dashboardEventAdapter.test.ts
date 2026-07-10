@@ -95,6 +95,67 @@ describe("mergeStreamedWithFinal", () => {
 
     expect(mergeStreamedWithFinal(streamed, finalText)).toBe(finalText);
   });
+
+  it("prefers final when garbled stream and clean final share the same top heading", () => {
+    const heading = "## MCP 与 A2A 的区别";
+    const filler =
+      "MCP 统一模型与外部工具的连接，A2A 统一 Agent 之间的协作协议，两者互补而非竞争。".repeat(
+        8,
+      );
+    const garbled = [
+      heading,
+      "",
+      filler,
+      "",
+      "### MCP（Model Context Protocol）",
+      "",
+      "**提出者**：Anthropic（2024年底发布）",
+      "",
+      "**核心思想**：",
+      "- 定义了一套标准化的方式 能够访问外部工具",
+      "",
+      "### A2A（Agent-to-Agent Protocol）",
+      "",
+      "**定位**：代理间通信协议****核心思想**：",
+      "- 定义了一套标准化的方式 AI Agent 能够互相发现",
+      "",
+      "### 核心对比",
+      "",
+      "| 维度 | MCP | A2A |",
+      "|------|-----|| **连接对象 ↔ 工具/数据 | Agent ↔ Agent |",
+      "",
+      "需要我深入方面吗？",
+    ].join("\n");
+    const clean = [
+      heading,
+      "",
+      filler,
+      "",
+      "### MCP（Model Context Protocol）",
+      "",
+      "**提出者**：Anthropic（2024年底发布）",
+      "",
+      "**核心思想**：",
+      "- 定义了一套标准化的方式，让 LLM 能够访问外部工具",
+      "",
+      "### A2A（Agent-to-Agent Protocol）",
+      "",
+      "**定位**：代理间通信协议",
+      "",
+      "**核心思想**：",
+      "- 定义了一套标准化的方式，让不同的 AI Agent 能够互相发现、通信、协作",
+      "",
+      "### 核心对比",
+      "",
+      "| 维度 | MCP | A2A |",
+      "|------|-----|-----|",
+      "| **连接对象** | 模型 ↔ 工具/数据 | Agent ↔ Agent |",
+      "",
+      "需要我深入某个方面吗？",
+    ].join("\n");
+
+    expect(mergeStreamedWithFinal(garbled, clean)).toBe(clean);
+  });
 });
 
 describe("applyDashboardStreamEvent — message.complete text reconciliation", () => {

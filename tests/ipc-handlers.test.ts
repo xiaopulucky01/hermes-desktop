@@ -78,6 +78,8 @@ describe("New IPC handlers from v0.8/v0.9 features", () => {
     "list-mcp-catalog",
     "install-mcp-catalog-entry",
     "discover-memory-providers",
+    "get-acp-launch-info",
+    "install-acp-extra",
   ];
 
   for (const ch of newChannels) {

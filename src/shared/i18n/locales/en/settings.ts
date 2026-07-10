@@ -19,7 +19,33 @@ export default {
     data: "Data",
     about: "About & Updates",
     community: "Community",
+    ide: "IDE Integration",
     logs: "Logs & Diagnostics",
+  },
+  acp: {
+    intro:
+      "Connect Zed, JetBrains, VS Code (ACP extension), and other ACP-compatible editors to your local Hermes engine. IDEs spawn Hermes in stdio JSON-RPC mode — the desktop generates a launcher script with the correct Python path and HERMES_HOME.",
+    title: "Agent Client Protocol (ACP)",
+    subtitle: "Use Hermes as an editor-native coding agent",
+    statusReady: "Ready",
+    statusUnavailable: "Setup required",
+    readyHint:
+      "Point your IDE's external agent setting at the launcher path below. Hermes logs go to stderr; stdout stays reserved for ACP protocol traffic.",
+    launcherPath: "Launcher command",
+    zedConfig: "Zed agent config (example)",
+    refreshLauncher: "Refresh launcher",
+    openDocs: "ACP documentation",
+    copy: "Copy",
+    copied: "Copied",
+    unavailableRemote:
+      "ACP requires a local Hermes engine. Switch Connection to local mode — remote and SSH modes cannot expose stdio ACP from this machine.",
+    unavailablePython:
+      "Hermes Python is not installed or could not be found. Install or repair the engine on the About tab first.",
+    unavailableExtra:
+      "The ACP adapter is not installed in your Hermes Python environment.",
+    unavailableCli: "Hermes CLI is unavailable.",
+    installExtra: "Install ACP extras",
+    installing: "Installing…",
   },
   agentSubtitle: "The local AI engine",
   desktopTitle: "Hermes One Desktop",

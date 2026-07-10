@@ -356,4 +356,42 @@ describe("AgentMarkdown", () => {
     expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(2);
     expect(container.textContent).not.toMatch(/\|\s*\|\s*- 3 个默认角色/);
   });
+
+  it("renders a bare MCP/A2A layer diagram as plain monospace", () => {
+    const markdown = [
+      "它们是互补而非竞争的",
+      "",
+      "[A2A 层]",
+      "    |",
+      "Agent A ──委托──> Agent B",
+      "    |",
+      "[MCP 层]",
+      "工具/数据",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-plain")).not.toBeNull();
+    expect(container.querySelector(".token")).toBeNull();
+    expect(container.textContent).toContain("[A2A 层]");
+    expect(container.textContent).toContain("工具/数据");
+  });
+
+  it("renders a fenced layer diagram with box borders and triangles as plain text", () => {
+    const markdown = [
+      "```",
+      "┌─────────┐",
+      "│ A2A 层  │",
+      "└─────────┘",
+      "    ▼",
+      "┌─────────┐",
+      "│ MCP 层  │",
+      "└─────────┘",
+      "```",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-plain")).not.toBeNull();
+    expect(container.querySelector(".token")).toBeNull();
+    expect(container.textContent).toContain("A2A 层");
+  });
 });

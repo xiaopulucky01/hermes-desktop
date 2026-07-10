@@ -14615,7 +14615,9 @@ body {
 .web-preview-webview-container {
   flex: 1;
   position: relative;
+  overflow: hidden;
   background: #ffffff;
+  min-height: 0;
 }
 
 .web-preview-webview-container webview {

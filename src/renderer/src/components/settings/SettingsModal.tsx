@@ -4,6 +4,7 @@ import {
   FileText,
   Info,
   Languages,
+  Code2,
   Palette,
   Plug,
   ShieldCheck,
@@ -22,6 +23,7 @@ import DataPane from "./DataPane";
 import AboutPane from "./AboutPane";
 import CommunityPane from "./CommunityPane";
 import LogsPane from "./LogsPane";
+import IdeIntegrationPane from "./IdeIntegrationPane";
 
 export type SettingsSection =
   | "appearance"
@@ -31,6 +33,7 @@ export type SettingsSection =
   | "data"
   | "about"
   | "community"
+  | "ide"
   | "logs";
 
 type NavGroup = "general" | "hermes";
@@ -81,6 +84,12 @@ const SETTINGS_NAV: ReadonlyArray<{
   },
   {
     group: "hermes",
+    id: "ide",
+    labelKey: "settings.nav.ide",
+    Icon: Code2,
+  },
+  {
+    group: "hermes",
     id: "logs",
     labelKey: "settings.nav.logs",
     Icon: FileText,
@@ -98,6 +107,7 @@ function resolveSection(name?: string): SettingsSection {
   if (key === "hermesagent") return "about";
   // Network merged into Connection — keep the old `/settings network` working.
   if (key === "network") return "connection";
+  if (key === "acp" || key === "ide") return "ide";
   const match = SETTINGS_NAV.find((s) => s.id === key);
   return match ? match.id : "appearance";
 }
@@ -195,6 +205,7 @@ export default function SettingsModal({
             {section === "data" && <DataPane />}
             {section === "about" && <AboutPane />}
             {section === "community" && <CommunityPane />}
+            {section === "ide" && <IdeIntegrationPane />}
             {section === "logs" && <LogsPane />}
           </SettingsDataContext.Provider>
         </div>

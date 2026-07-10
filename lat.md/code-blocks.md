@@ -12,13 +12,19 @@ The fix keys expansion on the opening fence's source offset (`node.position.star
 
 ## Box diagrams render plain, not highlighted
 
-Fenced blocks dominated by Unicode box-drawing characters (tree output like `├── src`, table borders, `█░` progress bars) or ASCII flowcharts (`→`, `↑`, repeated `|`/`_` columns) bypass Prism and render as a single plain `<pre><code>` flow via `PlainCodeView`.
+Fenced blocks dominated by box-drawing characters, ASCII flowcharts, or layer-stack markers bypass Prism and render via `PlainCodeView`.
 
 Prism fragments each glyph into nested token spans; in Electron renderers with imperfect Unicode metrics that fragmentation visually truncates or misaligns the diagram. Plain rendering also skips the lazy highlighter import and keeps the DOM to one text node. `fontVariantLigatures: "none"` and `unicodeBidi: "isolate"` guard glyph fidelity.
 
-The gate is [[src/renderer/src/components/AgentMarkdown.tsx#isPlainDiagram]]: at least half of the block's non-empty lines must contain a box-drawing glyph (U+2500–U+259F) or an ASCII diagram marker (arrows, `|___`, `----`). Density — not mere presence — is the discriminator, so one `│` in a string literal or comment does not demote a whole source file to plain text. The declared fence language (including `yaml`) does not override this — a mislabeled tree still renders plain so Prism cannot fragment the glyphs.
+The gate is [[src/renderer/src/screens/Chat/mediaUtils.ts#isPlainDiagram]]: diagram glyphs must dominate the block, or a layer marker (`[A2A 层]`, `▼`, box corners) must appear alongside at least one diagram line. One incidental `│` in source code does not demote the whole file. Mislabeled fence languages (including `yaml`) do not override plain rendering.
 
 Two precedence rules: `diff` blocks always keep the colored `DiffView` (it never uses Prism, so it has no fragmentation risk), and the header label keeps the fence's declared language — only an unlabeled box diagram is labeled `text`.
+
+## Bare layer diagrams wrap in text fences
+
+Bare MCP/A2A stack diagrams without fences are wrapped in `text` by [[src/renderer/src/screens/Chat/mediaUtils.ts#wrapBareDiagramBlocks]] before remark-gfm runs, so they render in monospace `pre` instead of misaligned prose.
+
+Bracket labels, vertical `|` connectors, agent arrows, and short caption lines trigger wrapping. Existing fences and glued-table rows are skipped.
 
 ## LLM markdown normalization
 
@@ -30,6 +36,7 @@ Additional repair passes run before the prose-only table fixes:
 - **Bare code** — consecutive lines that look like source (e.g. `app.get(…)`, `res.json(…)` without an opening fence) are wrapped in a detected-language fence so Prism can highlight them.
 - **Unclosed fences** — a missing closing ` ``` ` before trailing prose is inserted so later markdown is not swallowed as code.
 - **Glued tree diagrams** — one-line agent/skill tree output glued with `|` separators (e.g. `TypeScript 大师 (Agent) └── SOUL.md … | └── skills/ …`) is split onto separate lines and wrapped in a `text` fence so it renders in monospace `pre` instead of wrapping as prose.
+- **Bare layer diagrams** — multi-line MCP/A2A stack diagrams with bracket labels, vertical connectors, and agent arrows but no opening fence are wrapped in a `text` fence so they align in monospace `pre`.
 - **Pipe-comparison tiers** — product-tier lines that glue columns with `| | - item` (not valid GFM) become a `###` heading plus bullet list.
 
 Tables are wrapped in `.chat-table-wrap` for horizontal scroll only; cell typography matches the original agent-bubble table styles. Parsed `h1`–`h4` inside `.chat-bubble-agent` inherit body `font-weight` (not semibold) so repaired headings like `### 1. …` do not look bolder than surrounding prose.
