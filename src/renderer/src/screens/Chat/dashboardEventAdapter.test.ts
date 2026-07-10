@@ -67,6 +67,34 @@ describe("mergeStreamedWithFinal", () => {
       "Hello there",
     );
   });
+
+  it("prefers final when both texts share a long prefix (full rewrite)", () => {
+    const body = [
+      "寻找用户痛点和市场需求，核心是**从\"我觉得\"转向\"用户说\"**。几个实用方法：",
+      "",
+      "## 1. 观察现有用户的抱怨",
+      "",
+      "- **Reddit、Hacker News、V2EX、即刻**：搜索 \"Cursor sucks\" 等关键词",
+      "- **Twitter/X**：关注开发者吐槽 AI 编程工具的帖子",
+      " Issues**：看 Cursor、Copilot 等竞品的 issue 列表",
+      "- **Product Hunt、G2 评论**：看竞品的 1-3 星评价",
+      "",
+      "## 2. 直接和目标用户对话",
+      "",
+      "- 找 1-20 个正在用 Cursor/Copilot 的开发者，做 30 分钟访谈",
+      "- 问**行为**而非**意见**：\"你上周用 AI 编程工具时，哪个场景让你想砸键盘？\"",
+      "",
+      "## 3. 验证付费意愿",
+      "",
+      "- **Landing page 测试**：做产品页，看 waitlist 转化率",
+      "- **Fake door test**：放一个 \"高级功能\" 按钮统计点击量",
+    ].join("\n");
+
+    const streamed = `${body}\n\n你现在最该验证的假设是什么？我可以帮你设计`;
+    const finalText = `${body.replace(" Issues", "- **GitHub Issues").replace("1-20", "10-20")}\n\n你现在最该验证的假设是什么？我可以帮你设计具体的验证实验。`;
+
+    expect(mergeStreamedWithFinal(streamed, finalText)).toBe(finalText);
+  });
 });
 
 describe("applyDashboardStreamEvent — message.complete text reconciliation", () => {

@@ -413,6 +413,13 @@ function commonSuffixLength(a: string, b: string): number {
   return n;
 }
 
+/** Longest shared prefix on whitespace-normalized text. */
+function commonPrefixLength(a: string, b: string): number {
+  let n = 0;
+  while (n < a.length && n < b.length && a[n] === b[n]) n++;
+  return n;
+}
+
 function tailHeadOverlap(a: string, b: string): number {
   const word = /\w/;
   const max = Math.min(a.length, b.length);
@@ -440,6 +447,7 @@ function tailHeadOverlap(a: string, b: string): number {
  *   - final ⊇ streamed → final
  *   - streamed ⊇ final → streamed (keeps the pre-tool-call text)
  *   - tail/head overlap → stitch, dropping the duplicated seam
+ *   - shared long prefix → final (model re-sent a revised full answer)
  *   - otherwise        → concatenate with a blank-line separator so the two
  *                        segments don't run together ("check.It's" / "4answer")
  *
@@ -462,6 +470,20 @@ export function mergeStreamedWithFinal(
 
   const overlap = tailHeadOverlap(streamedContent, finalContent);
   if (overlap > 0) return `${streamedContent}${finalContent.slice(overlap)}`;
+
+  // The model streamed a nearly complete answer, then final_response carried a
+  // revised full rewrite from the top (minor edits / a completed ending) rather
+  // than a disjoint post-tool segment. Without this, the concatenate branch
+  // stacks both copies.
+  const shorterNorm = Math.min(normStreamed.length, normFinal.length);
+  const sharedPrefix = commonPrefixLength(normStreamed, normFinal);
+  if (
+    shorterNorm >= 400 &&
+    sharedPrefix >= 100 &&
+    sharedPrefix / shorterNorm >= 0.12
+  ) {
+    return finalContent;
+  }
 
   // A re-streamed correction: the streamed deltas were garbled (e.g. a
   // corrupted CJK prefix) but converged on the same ending as the final text.
