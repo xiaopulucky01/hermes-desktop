@@ -182,14 +182,42 @@ function markdownDestination(raw: string): string {
     : trimmed;
 }
 
+/** True when a trimmed line is part of a pipe-delimited markdown table. */
+function isTableContentLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith("|") && trimmed.includes("|", 1);
+}
+
 /** Char ranges of ``` fenced blocks and `inline` code spans. */
-function codeRanges(content: string): Array<[number, number]> {
+function codeRanges(
+  content: string,
+  opts?: { protectInlineInTableLines?: boolean },
+): Array<[number, number]> {
+  const protectInlineInTableLines = opts?.protectInlineInTableLines ?? true;
   const ranges: Array<[number, number]> = [];
   let m: RegExpExecArray | null;
   const fenced = /```[\s\S]*?```/g;
   while ((m = fenced.exec(content)) !== null) {
     ranges.push([m.index, m.index + m[0].length]);
   }
+
+  if (!protectInlineInTableLines) {
+    let offset = 0;
+    for (const line of content.split("\n")) {
+      const lineStart = offset;
+      const lineEnd = lineStart + line.length;
+      offset = lineEnd + 1;
+      if (isTableContentLine(line)) continue;
+      const inline = /`[^`\n]+`/g;
+      inline.lastIndex = 0;
+      const slice = content.slice(lineStart, lineEnd);
+      while ((m = inline.exec(slice)) !== null) {
+        ranges.push([lineStart + m.index, lineStart + m.index + m[0].length]);
+      }
+    }
+    return ranges;
+  }
+
   const inline = /`[^`\n]+`/g;
   while ((m = inline.exec(content)) !== null) {
     ranges.push([m.index, m.index + m[0].length]);
@@ -222,7 +250,9 @@ function transformOutsideCode(
   content: string,
   transform: (text: string) => string,
 ): string {
-  const ranges = codeRanges(content);
+  // Keep inline backticks inside table rows intact — otherwise transforms
+  // run on fragments and corrupt cells like `` 创建 `/.well-known/...` ``.
+  const ranges = codeRanges(content, { protectInlineInTableLines: false });
   if (ranges.length === 0) return transform(content);
   ranges.sort((a, b) => a[0] - b[0]);
   let result = "";
@@ -296,16 +326,289 @@ function normalizeTableRowPipes(text: string): string {
     .join("\n");
 }
 
-/** Split table rows glued on one line: "| ~5MB | | 桌面壳 |" → newline boundary. */
-function splitGluedTableRowsInLine(line: string): string {
-  const trimmed = line.trim();
+/** Count cells in a pipe-delimited table row, including empty cells. */
+function countTableColumns(row: string): number {
+  return parseTableCells(row).length;
+}
+
+/** GFM separator with spaced dash cells, e.g. `| --- | --- |`. */
+function isStandardSeparatorFormat(trimmed: string): boolean {
+  return /^\|\s+[-:]{3,}\s+(\|\s+[-:]{3,}\s+)+\|$/.test(trimmed);
+}
+
+/** Expand a one-cell `|------|` separator to match the header column count. */
+function fixMalformedSeparatorRows(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const isSeparator =
+      TABLE_SEPARATOR_RE.test(trimmed) ||
+      /^\|[-:\s|]+\|$/.test(trimmed);
+    if (isSeparator) {
+      const prev = previousNonBlankLine(out, out.length - 1);
+      if (prev && TABLE_ROW_RE.test(prev.trim())) {
+        const cols = countTableColumns(prev);
+        const sepCols = countTableColumns(trimmed);
+        if (
+          cols >= 2 &&
+          (sepCols !== cols || !isStandardSeparatorFormat(trimmed))
+        ) {
+          out.push(`|${" --- |".repeat(cols)}`);
+          continue;
+        }
+      }
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/** Drop a stray leading/trailing `||` before splitting glued table rows. */
+function prepareGluedTableLine(line: string): string {
+  const leading = line.match(/^\s*/)?.[0] ?? "";
+  let trimmed = line.trim();
   if (!trimmed.startsWith("|")) return line;
-  let s = line;
+  if (trimmed.startsWith("||")) trimmed = trimmed.replace(/^\|\|/, "|");
+  trimmed = trimmed.replace(/\|\|\s*$/, "|");
+  return `${leading}${trimmed}`;
+}
+
+/** Remove orphan `|` rows left after glued-table splitting. */
+function stripOrphanTableRows(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      return t !== "|" && t !== "||";
+    })
+    .join("\n");
+}
+
+/** Parse pipe-delimited cells, preserving empty cells from `| |` row glue. */
+function parseTableCells(row: string): string[] {
+  const trimmed = row.trim();
+  if (!trimmed.startsWith("|")) return [];
+  const parts = trimmed.split("|");
+  if (parts.length <= 2) return [];
+  return parts.slice(1, -1).map((cell) => cell.trim());
+}
+
+/** Split cell list on empty entries created by `| |` row boundaries. */
+function splitCellsOnRowBoundaries(cells: string[]): string[][] {
+  const rows: string[][] = [];
+  let current: string[] = [];
+  for (const cell of cells) {
+    if (cell === "") {
+      if (current.length > 0) {
+        rows.push(current);
+        current = [];
+      }
+      continue;
+    }
+    current.push(cell);
+  }
+  if (current.length > 0) rows.push(current);
+  return rows;
+}
+
+/** Fit one row's cells to the table width by merging overflow into the last column. */
+function fitTableRowCells(cells: string[], columns: number): string[] {
+  if (columns <= 0 || cells.length <= columns) return cells;
+  return [
+    ...cells.slice(0, columns - 1),
+    cells.slice(columns - 1).join(" "),
+  ];
+}
+
+function formatTableRow(cells: string[]): string {
+  return `| ${cells.join(" | ")} |`;
+}
+
+/** Pad or split a merged header label like `Skill Agent` to the table width. */
+function expandMergedHeaderLabel(label: string, columns: number): string[] {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2 && words.length <= columns) {
+    return [...Array(columns - words.length).fill(""), ...words];
+  }
+  return [label.trim()];
+}
+
+/** Expand a header row when its cells were glued (`Skill Agent`) or too narrow. */
+function fixMergedTableHeaders(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const next = lines[i + 1]?.trim() ?? "";
+    if (trimmed.startsWith("|") && isPureTableSeparatorLine(next)) {
+      const headerCols = countTableColumns(trimmed);
+      const sepCols = countTableColumns(next);
+      if (headerCols > 0 && headerCols < sepCols) {
+        const cells = parseTableCells(trimmed);
+        if (cells.length === 1) {
+          out.push(formatTableRow(expandMergedHeaderLabel(cells[0], sepCols)));
+          continue;
+        }
+        if (cells.length === 2 && cells[0] === "" && cells[1].includes(" ")) {
+          out.push(formatTableRow(expandMergedHeaderLabel(cells[1], sepCols)));
+          continue;
+        }
+      }
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/** Turn glued dash separators like `||---|---|---|` into a GFM separator row. */
+function expandGluedDashSeparators(line: string): string {
+  return line.replace(
+    /\|\|((?:\s*[-:|]+\s*)+)\|\|\s*/g,
+    (_match, sep: string) => {
+      const cols =
+        sep
+          .split("|")
+          .map((part: string) => part.trim())
+          .filter((part: string) => /[-:]{3,}/.test(part)).length ||
+        sep.match(/[-:]{3,}/g)?.length ||
+        0;
+      if (cols < 2) return _match;
+      return `|\n|${" --- |".repeat(cols)}\n| `;
+    },
+  );
+}
+
+/** Expand compact trailing separators such as `||-------|----------|-----|`. */
+function expandInlineDashSeparators(text: string): string {
+  return text.replace(
+    /\|\|((?:[-:]{3,}\|)+[-:]{3,})\|/g,
+    (match, sep: string) => {
+      const cols = sep.split("|").filter(Boolean).length;
+      if (cols < 2) return match;
+      return `\n|${" --- |".repeat(cols)}`;
+    },
+  );
+}
+
+/** Pre-split repairs for one-line tables: leading `||`, glued separators. */
+function normalizeSingleLineTableBlock(line: string): string {
+  let s = prepareGluedTableLine(line);
+  if (!s.trim().startsWith("|")) return expandInlineDashSeparators(line);
+  s = expandGluedDashSeparators(s);
+  return s;
+}
+
+/** Split one glued table line using `| |` boundaries and the active column count. */
+function splitGluedTableRowByStructure(line: string, columns: number): string | null {
+  if (columns < 2) return null;
+  const cells = parseTableCells(line);
+  if (cells.length <= columns) return null;
+
+  const rowGroups = splitCellsOnRowBoundaries(cells);
+  let rows: string[];
+
+  if (rowGroups.length > 1) {
+    rows = rowGroups.map((group) =>
+      formatTableRow(fitTableRowCells(group, columns)),
+    );
+  } else if (cells.length % columns === 0) {
+    rows = [];
+    for (let i = 0; i < cells.length; i += columns) {
+      rows.push(formatTableRow(cells.slice(i, i + columns)));
+    }
+  } else {
+    rows = [formatTableRow(fitTableRowCells(cells, columns))];
+  }
+
+  const result = rows.join("\n");
+  return result !== line.trim() ? result : null;
+}
+
+function isPureTableSeparatorLine(trimmed: string): boolean {
+  return /^\|\s*[-:][-:|\s]+\|\s*$/.test(trimmed);
+}
+
+/** Split glued table rows line-by-line, tracking the active header width. */
+function splitGluedTableLines(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let tableColumns = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const pipeSplit = splitGluedTableRowsInLine(line).split("\n");
+
+    for (let j = 0; j < pipeSplit.length; j++) {
+      const splitLine = pipeSplit[j];
+      const trimmed = splitLine.trim();
+
+      if (isPureTableSeparatorLine(trimmed)) {
+        tableColumns = countTableColumns(trimmed);
+        const prevIdx = out.length - 1;
+        if (prevIdx >= 0) {
+          const prevTrimmed = out[prevIdx].trim();
+          const headerCells = parseTableCells(prevTrimmed);
+          if (
+            headerCells.length === 1 &&
+            tableColumns > headerCells.length
+          ) {
+            out[prevIdx] = formatTableRow(
+              expandMergedHeaderLabel(headerCells[0], tableColumns),
+            );
+          } else if (
+            headerCells.length === 2 &&
+            headerCells[0] === "" &&
+            headerCells[1].includes(" ")
+          ) {
+            out[prevIdx] = formatTableRow(
+              expandMergedHeaderLabel(headerCells[1], tableColumns),
+            );
+          }
+        }
+        out.push(splitLine);
+        continue;
+      }
+
+      if (TABLE_ROW_RE.test(trimmed) && looksLikeTableHeader(trimmed)) {
+        const next =
+          pipeSplit[j + 1]?.trim() ??
+          lines[i + 1]?.trim() ??
+          "";
+        if (
+          isPureTableSeparatorLine(next) ||
+          TABLE_SEPARATOR_RE.test(next) ||
+          isTableDataOrHeaderRow(next)
+        ) {
+          tableColumns = countTableColumns(trimmed);
+        }
+      }
+
+      const structured =
+        tableColumns >= 2
+          ? splitGluedTableRowByStructure(splitLine, tableColumns)
+          : null;
+      if (structured) out.push(...structured.split("\n"));
+      else out.push(splitLine);
+    }
+  }
+
+  return out.join("\n");
+}
+
+/** Split table rows glued on one line: "| a | b | || c | d |" → newline boundary. */
+function splitGluedTableRowsInLine(line: string): string {
+  const prepared = prepareGluedTableLine(line);
+  const trimmed = prepared.trim();
+  if (!trimmed.startsWith("|")) return line;
+  let s = prepared;
   let prev: string;
   do {
     prev = s;
-    // Row ends with cell content, next row starts — not an empty cell "| |".
-    s = s.replace(/(\S)\s*\|\s*\|(\s*\S)/g, "$1 |\n|$2");
+    // Row glue uses consecutive pipes `||` (no space) — distinct from an empty
+    // cell `| |`. Splitting on `\S` before `||` breaks inside words ("Agent").
+    s = s.replace(/\|\|(\s*)/g, "|\n|$1");
   } while (s !== prev);
   return s;
 }
@@ -607,14 +910,21 @@ export function normalizeAgentMarkdown(content: string): string {
     t = normalizeGluedTreeDiagrams(t);
     t = normalizePipeComparisonBlocks(t);
 
+    // Expand glued dash separators (`||---|---|---| ||`) before other pipe fixes.
+    t = t
+      .split("\n")
+      .map((line) => normalizeSingleLineTableBlock(line))
+      .join("\n");
+
     // "...文字## 标题" → break before the heading marker.
     t = t.replace(/([^\n#])(#{1,6}\s+)/g, "$1\n\n$2");
 
     // Header row glued to its separator: "| a | b | |---|---|" → newline.
     t = t.replace(/(\|[^|\n]+\|[^|\n]+\|[^|\n]*\|)\s*(\|[-:][-:| ]+\|)/g, "$1\n$2");
 
-    // Double-pipe before a separator row: "原因 ||---|" → "原因 |\n|---|".
-    t = t.replace(/\|\s*\|(?=[-:])/g, "|\n|");
+    // Empty-cell boundary before a separator row: "原因 | |---|" → "原因 |\n|---|".
+    // Do not match consecutive `||` — that form is handled by expandGluedDashSeparators.
+    t = t.replace(/\|\s+\|(?=[-:])/g, "|\n|");
 
     // Blank line before a table when it immediately follows prose.
     t = t.replace(
@@ -638,15 +948,13 @@ export function normalizeAgentMarkdown(content: string): string {
     );
 
     // "| ~5MB | | 桌面壳 |" and similar row glue on a single line.
-    t = t
-      .split("\n")
-      .flatMap((line) => splitGluedTableRowsInLine(line).split("\n"))
-      .join("\n");
-
-    // Blank lines between rows break GFM tables — compact before inserting separators.
+    // Insert separators first so column width is known when splitting glued rows.
     t = compactTableBlocks(t);
-
     t = insertMissingTableSeparators(t);
+    t = fixMergedTableHeaders(t);
+    t = stripOrphanTableRows(splitGluedTableLines(t));
+    t = fixMergedTableHeaders(t);
+    t = fixMalformedSeparatorRows(t);
     t = normalizeTableRowPipes(t);
 
     return t;

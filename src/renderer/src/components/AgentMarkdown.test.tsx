@@ -290,6 +290,58 @@ describe("AgentMarkdown", () => {
     expect(container.querySelector(".token")).toBeNull();
   });
 
+  it("renders a glued OpenClaw vs Hermes comparison table", () => {
+    const markdown =
+      "| 维度 | OpenClaw | Hermes Agent || ------ || 定位 | 个人 AI 助手（消费者） | 自主 agent 基础设施部署 || 架构 | Gateway daemon + nodes | Agent + 多后端 || 协作 | 多 agent 路由 | 开发者、研究者、高级用户 || 社区规模背景 | OpenAI 支持 | Nous Research |";
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-table-wrap table")).not.toBeNull();
+    expect(container.querySelectorAll("tr").length).toBeGreaterThanOrEqual(4);
+    expect(container.textContent).toContain("OpenClaw");
+    expect(container.textContent).toContain("Hermes Agent");
+    expect(container.textContent).not.toContain("||");
+  });
+
+  it("renders a Skill vs Agent summary table with a leading double pipe", () => {
+    const markdown =
+      "|| Skill | Agent || --- | --- || 是什么 | 一项能力 | 一个角色 || 有无灵魂 | ❌ 无 | ✅ 有 (SOUL.md) || 有无记忆 | ❌ 无 | ✅ 有 || 独立性 | 不能独立运行 | 独立运行 || 组合 | 1 个 | N 个 Skills || 卖给用户 | 工具 | 专家 |";
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-table-wrap table")).not.toBeNull();
+    expect(container.querySelectorAll("tr").length).toBeGreaterThanOrEqual(5);
+    expect(container.textContent).toContain("Skill");
+    expect(container.textContent).toContain("Agent");
+    expect(container.textContent).not.toContain("||");
+  });
+
+  it("renders a Skill vs Agent table when header words are merged", () => {
+    const markdown =
+      "|| Skill Agent ||---|---|---| || 是什么 | 一项能力 | 一个角色 || 有无灵魂 | ❌ 无 | ✅ 有 (SOUL.md) || 有无记忆 | ❌ 无 | ✅ 有 || 独立性 | 不能独立运行 | 独立运行 || 组合 | 1 个 | N 个 Skills || 卖给用户 | 工具 | 专家 |";
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-table-wrap table")).not.toBeNull();
+    expect(container.querySelectorAll("tr").length).toBeGreaterThanOrEqual(5);
+    expect(container.textContent).toContain("Skill");
+    expect(container.textContent).toContain("Agent");
+    expect(container.textContent).not.toContain("||");
+  });
+
+  it("renders an A2A requirements table with rows glued via empty cells", () => {
+    const markdown = [
+      "| 要求 | Hermes 现状 | 适配方案 |",
+      "| --- | --- | --- |",
+      "| Agent Card | ❌ 无 | 创建 `/.well-known/agent.json` |",
+      "| 任务管理 API | ❌ 无标准 REST API | 封装 | delegate_task 为 HTTP 端点 | | 输入/输出 Schema | ❌ 无 | 为每个角色定义 JSON Schema | | 认证机制 | ✅ 已有 API key | 扩展为 OAuth2 或 Bearer Token | | 状态管理 | ✅ Session 机制 | 映射到 A2A 的 Task 状态 |",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-table-wrap table")).not.toBeNull();
+    expect(container.querySelectorAll("tr").length).toBeGreaterThanOrEqual(5);
+    expect(container.textContent).toContain("认证机制");
+    expect(container.textContent).toContain("状态管理");
+    expect(container.textContent).toContain("/.well-known/agent.json");
+  });
+
   it("renders pipe-comparison tiers as headings and lists", () => {
     const markdown = [
       "Hermes Agent 基础功能 | | - 3 个默认角色 | | - 基础 Skills | |",

@@ -534,7 +534,7 @@ describe("normalizeAgentMarkdown", () => {
   it("splits a header row glued to its separator", () => {
     const raw = "| 目标 | 能否解决 | 原因 ||-------|----------|-----|";
     expect(normalizeAgentMarkdown(raw)).toBe(
-      "| 目标 | 能否解决 | 原因 |\n|-------|----------|-----|",
+      "| 目标 | 能否解决 | 原因 |\n| --- | --- | --- |",
     );
   });
 
@@ -656,5 +656,64 @@ describe("normalizeAgentMarkdown", () => {
   it("does not wrap normal prose that uses single pipes", () => {
     const raw = "Choose A | B | C for the answer.";
     expect(normalizeAgentMarkdown(raw)).toBe(raw);
+  });
+
+  it("splits a glued OpenClaw vs Hermes table with double pipes", () => {
+    const raw =
+      "| 维度 | OpenClaw | Hermes Agent || ------ || 定位 | 个人 AI 助手（消费者） | 自主 agent 基础设施部署 || 架构 | Gateway daemon + nodes | Agent + 多后端 || 协作 | 多 agent 路由 | 开发者、研究者、高级用户 || 社区规模背景 | OpenAI 支持 | Nous Research |";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| 维度 | OpenClaw | Hermes Agent |");
+    expect(out).toContain("| --- | --- | --- |");
+    expect(out).toContain("| 定位 | 个人 AI 助手（消费者） | 自主 agent 基础设施部署 |");
+    expect(out).toContain("| 社区规模背景 | OpenAI 支持 | Nous Research |");
+    expect(out).not.toContain("||");
+  });
+
+  it("splits glued table rows without breaking words before double pipes", () => {
+    const raw = "| 维度 | OpenClaw | Hermes Agent ||------|| 定位 | 测试 |";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("Hermes Agent |");
+    expect(out).not.toContain("Agento |");
+    expect(out).not.toContain("||");
+  });
+
+  it("preserves inline code inside a table cell", () => {
+    const raw = "| Agent Card | ❌ 无 | 创建 `/.well-known/agent.json` |";
+    expect(normalizeAgentMarkdown(raw)).toBe(raw);
+  });
+
+  it("splits rows glued with empty-cell boundaries on one line", () => {
+    const raw = [
+      "| 要求 | Hermes 现状 | 适配方案 |",
+      "| --- | --- | --- |",
+      "| 任务管理 API | ❌ 无标准 REST API | 封装 delegate_task 为 HTTP 端点 | | 输入/输出 Schema | ❌ 无 | 为每个角色定义 JSON Schema | | 认证机制 | ✅ 已有 API key | 扩展为 OAuth2 或 Bearer Token |",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| 任务管理 API | ❌ 无标准 REST API | 封装 delegate_task 为 HTTP 端点 |");
+    expect(out).toContain("| 输入/输出 Schema | ❌ 无 | 为每个角色定义 JSON Schema |");
+    expect(out).toContain("| 认证机制 | ✅ 已有 API key | 扩展为 OAuth2 或 Bearer Token |");
+  });
+
+  it("expands a merged Skill Agent header and glued dash separator", () => {
+    const raw =
+      "|| Skill Agent ||---|---|---| || 是什么 | 一项能力 | 一个角色 || 有无灵魂 | ❌ 无 | ✅ 有 (SOUL.md) || 卖给用户 | 工具 | 专家 |";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| Skill | Agent |");
+    expect(out).toMatch(/\| --- \| --- \| --- \|/);
+    expect(out).toContain("| 是什么 | 一项能力 | 一个角色 |");
+    expect(out).not.toContain("||");
+    expect(out).not.toContain("Skill Agent |");
+  });
+
+  it("splits a table that starts with a stray leading double pipe", () => {
+    const raw =
+      "|| Skill | Agent || --- | --- || 是什么 | 一项能力 | 一个角色 || 有无灵魂 | ❌ 无 | ✅ 有 (SOUL.md) || 有无记忆 | ❌ 无 | ✅ 有 || 独立性 | 不能独立运行 | 独立运行 || 组合 | 1 个 | N 个 Skills || 卖给用户 | 工具 | 专家 |";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| Skill | Agent |");
+    expect(out).toContain("| --- | --- |");
+    expect(out).toContain("| 是什么 | 一项能力 | 一个角色 |");
+    expect(out).toContain("| 卖给用户 | 工具 | 专家 |");
+    expect(out).not.toContain("||");
+    expect(out.split("\n").some((line) => line.trim() === "|")).toBe(false);
   });
 });
