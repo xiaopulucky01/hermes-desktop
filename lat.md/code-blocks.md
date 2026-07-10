@@ -24,7 +24,7 @@ Two precedence rules: `diff` blocks always keep the colored `DiffView` (it never
 
 Bare MCP/A2A stack diagrams without fences are wrapped in `text` by [[src/renderer/src/screens/Chat/mediaUtils.ts#wrapBareDiagramBlocks]] before remark-gfm runs, so they render in monospace `pre` instead of misaligned prose.
 
-Bracket labels, vertical `|` connectors, agent arrows, and short caption lines trigger wrapping. Existing fences and glued-table rows are skipped.
+Bracket labels, vertical `|` connectors, agent arrows, and short caption lines trigger wrapping. Existing fences and glued-table rows are skipped. Numbered or bullet lists with `**bold**` labels (e.g. `1. **记忆** → …`) stay markdown — they are never wrapped or plain-rendered as diagrams.
 
 ## LLM markdown normalization
 

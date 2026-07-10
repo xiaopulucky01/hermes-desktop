@@ -669,6 +669,15 @@ const MISLABELED_FENCE_LANGS = new Set([
   "",
 ]);
 
+function isMarkdownListLine(trimmed: string): boolean {
+  if (/^[-*+]\s/.test(trimmed)) return true;
+  if (!/^\d+\.\s/.test(trimmed)) return false;
+  // Flowchart rows like `1. foo → 1. bar` glue two columns — not a list item.
+  const rest = trimmed.replace(/^\d+\.\s/, "");
+  if (/\d+\.\s/.test(rest)) return false;
+  return true;
+}
+
 /** True when a fenced block's body is markdown prose mislabeled as yaml/json/etc. */
 function fenceContentIsMarkdown(body: string, lang: string): boolean {
   const trimmed = body.trim();
@@ -676,12 +685,15 @@ function fenceContentIsMarkdown(body: string, lang: string): boolean {
 
   const lines = trimmed.split("\n").filter((line) => line.trim() !== "");
   const tableRows = lines.filter((line) => isTableLine(line.trim())).length;
+  const listLines = lines.filter((line) => isMarkdownListLine(line.trim())).length;
   const hasMarkdownHeader = /^#{1,6}\s+\S/m.test(trimmed);
   const hasMarkdownBold = /\*\*[^*]+\*\*/.test(trimmed);
 
   if (hasMarkdownHeader && tableRows >= 1) return true;
   if (tableRows >= 2 && (hasMarkdownHeader || hasMarkdownBold)) return true;
   if (lines.length >= 2 && tableRows * 2 >= lines.length) return true;
+  // Numbered/bullet lists with bold labels — e.g. `1. **记忆** → …`
+  if (listLines >= 2 && listLines === lines.length && hasMarkdownBold) return true;
   return false;
 }
 
@@ -886,6 +898,7 @@ export function isDiagramLine(line: string): boolean {
   if (!trimmed || isTableLine(trimmed) || looksLikeGluedTableLine(trimmed)) {
     return false;
   }
+  if (isMarkdownListLine(trimmed)) return false;
   if (/^```/.test(trimmed)) return false;
   return (
     BOX_DRAWING_RE.test(line) ||
@@ -900,6 +913,8 @@ export function isDiagramLine(line: string): boolean {
 export function isPlainDiagram(code: string): boolean {
   const lines = code.split("\n").filter((line) => line.trim() !== "");
   if (lines.length === 0) return false;
+
+  if (lines.every((line) => isMarkdownListLine(line.trim()))) return false;
 
   const diagramLines = lines.filter((line) => isDiagramLine(line)).length;
   const hasLayerMarker = lines.some((line) => LAYER_MARKER_RE.test(line.trim()));

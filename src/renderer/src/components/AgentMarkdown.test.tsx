@@ -394,4 +394,18 @@ describe("AgentMarkdown", () => {
     expect(container.querySelector(".token")).toBeNull();
     expect(container.textContent).toContain("A2A 层");
   });
+
+  it("renders numbered bold lists as markdown instead of plain code blocks", () => {
+    const markdown = [
+      "1. **记忆** → 你是谁、你喜欢什么（稳定事实）",
+      "2. **技能** → 你经常做什么、怎么做（可复用流程）",
+      "3. **会话** → 你最近在做什么（短期上下文）",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-plain")).toBeNull();
+    expect(container.querySelectorAll("strong").length).toBeGreaterThanOrEqual(3);
+    expect(container.textContent).toContain("记忆");
+    expect(container.textContent).not.toContain("**记忆**");
+  });
 });

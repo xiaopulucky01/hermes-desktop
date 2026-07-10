@@ -5,6 +5,7 @@ import {
   describeImageSrc,
   cleanLeakedToolTags,
   normalizeAgentMarkdown,
+  isPlainDiagram,
   type MediaSegment,
 } from "./mediaUtils";
 
@@ -516,6 +517,26 @@ describe("cleanLeakedToolTags", () => {
   });
 });
 
+describe("isPlainDiagram", () => {
+  it("treats dual-column flowchart rows as plain diagrams", () => {
+    const code = [
+      "传统流程                    AI流程",
+      "1. 获取需求    →    1. 获取需求",
+      "         ↑__________________|",
+    ].join("\n");
+    expect(isPlainDiagram(code)).toBe(true);
+  });
+
+  it("does not treat numbered bold lists as plain diagrams", () => {
+    const code = [
+      "1. **记忆** → 你是谁、你喜欢什么（稳定事实）",
+      "2. **技能** → 你经常做什么、怎么做（可复用流程）",
+      "3. **会话** → 你最近在做什么（短期上下文）",
+    ].join("\n");
+    expect(isPlainDiagram(code)).toBe(false);
+  });
+});
+
 describe("normalizeAgentMarkdown", () => {
   it("breaks mid-line headings before remark-gfm parses them", () => {
     const raw = "你问到了核心问题。让我## 之前的方案能解决吗？";
@@ -739,5 +760,30 @@ describe("normalizeAgentMarkdown", () => {
   it("does not wrap a normal prose sentence about MCP and A2A", () => {
     const raw = "MCP 与 A2A 是互补的协议，分别解决不同层的问题。";
     expect(normalizeAgentMarkdown(raw)).toBe(raw);
+  });
+
+  it("does not wrap numbered bold lists that use arrow separators", () => {
+    const raw = [
+      "1. **记忆** → 你是谁、你喜欢什么（稳定事实）",
+      "2. **技能** → 你经常做什么、怎么做（可复用流程）",
+      "3. **会话** → 你最近在做什么（短期上下文）",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toBe(raw);
+    expect(out).not.toContain("```");
+  });
+
+  it("unwraps a text fence around a numbered bold list", () => {
+    const raw = [
+      "```text",
+      "1. **记忆** → 你是谁、你喜欢什么（稳定事实）",
+      "2. **技能** → 你经常做什么、怎么做（可复用流程）",
+      "3. **会话** → 你最近在做什么（短期上下文）",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("```");
+    expect(out).toContain("**记忆**");
+    expect(out).toContain("**技能**");
   });
 });
