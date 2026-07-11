@@ -662,6 +662,7 @@ const MISLABELED_FENCE_LANGS = new Set([
   "yml",
   "json",
   "text",
+  "txt",
   "plaintext",
   "plain",
   "markdown",
@@ -678,13 +679,250 @@ function isMarkdownListLine(trimmed: string): boolean {
   return true;
 }
 
+/** True for recommendation rows like `**如果追求 X** → 方向 N` — prose, not diagrams. */
+function isBoldArrowProseLine(trimmed: string): boolean {
+  if (/^\*\*\s*(?:→|->)/.test(trimmed)) return false;
+  return (
+    /^\*\*[^*\n]+\*\*[\s\u00a0\u202f]*(?:→|->|➜|➡|⇒|⟶|—>|–>|=>)[\s\u00a0\u202f]*\S/u.test(
+      trimmed,
+    ) || /^\*\*[^*\n]+\*\*[\s\u00a0\u202f]+[^\s*]/u.test(trimmed)
+  );
+}
+
+/** True when every non-blank line opens with a bold label (`**…**`). */
+function hasBoldProseLines(body: string): boolean {
+  const lines = body.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return false;
+  return lines.every((line) => /^\*\*[^*\n]+\*\*/.test(line));
+}
+
+/** True for vertical-scenario recommendation rows (with or without `**`). */
+function isRecommendationRow(trimmed: string): boolean {
+  if (isBoldArrowProseLine(trimmed)) return true;
+  if (isStarArrowRow(trimmed)) return true;
+  if (
+    /^如果(?:追求|没有|你有)[^\n]*?(?:→|->|➜|➡|⇒|⟶|—>|–>|=>)/u.test(
+      trimmed,
+    )
+  ) {
+    return true;
+  }
+  return (
+    /^\*\*如果[^*\n]+\*\*/.test(trimmed) &&
+    /(?:→|->|➜|➡|⇒|⟶|—>|–>|=>)/u.test(trimmed)
+  );
+}
+
+/** Split one physical line that glued several recommendation rows together. */
+function splitGluedRecommendationRow(trimmed: string): string[] {
+  const rowLabelCount =
+    trimmed.match(
+      /\*\*[^*\n]+\*\*(?=[\s\u00a0\u202f]*(?:→|->|➜|➡|⇒|⟶|—>|–>|=>))/gu,
+    )?.length ?? 0;
+
+  // Keep inline tail emphasis (`→ 做**开发者工具**`) on a single row intact.
+  if (rowLabelCount <= 1 && isBoldArrowProseLine(trimmed)) {
+    return [trimmed];
+  }
+
+  if (/^\*\*[^*\n]+\*\*/.test(trimmed)) {
+    const parts = trimmed
+      .split(
+        /(?=\*\*[^*\n]+\*\*(?=[\s\u00a0\u202f]*(?:→|->|➜|➡|⇒|⟶|—>|–>|=>)))/u,
+      )
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (parts.length > 1) return parts;
+  }
+  const labelCount = trimmed.match(/如果(?:追求|没有|你有)/g)?.length ?? 0;
+  if (labelCount > 1) {
+    return trimmed
+      .split(/\s+(?=如果(?:追求|没有|你有))/u)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  return [trimmed];
+}
+
+/** Turn recommendation rows into a bullet list so GFM keeps one row per line. */
+function normalizeBoldRecommendationRows(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (!lines[i].trim()) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    const startPieces = splitGluedRecommendationRow(lines[i].trim());
+    const startsBlock =
+      startPieces.length > 1 ||
+      (startPieces.length === 1 && isRecommendationRow(startPieces[0]));
+
+    if (!startsBlock) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    const block: string[] = [...startPieces];
+    i++;
+
+    while (i < lines.length && lines[i].trim()) {
+      const pieces = splitGluedRecommendationRow(lines[i].trim());
+      if (pieces.length > 1) {
+        block.push(...pieces);
+      } else if (isRecommendationRow(pieces[0])) {
+        block.push(pieces[0]);
+      } else {
+        break;
+      }
+      i++;
+    }
+
+    if (block.length >= 2 && block.every(isRecommendationRow)) {
+      out.push("", ...block.map((row) => `- ${row}`), "");
+    } else if (startPieces.length > 1) {
+      out.push("", ...startPieces, "");
+    } else {
+      out.push(block[0]);
+    }
+  }
+
+  return out.join("\n");
+}
+
+/** True for `* -> …` / `• -> …` pseudo-list arrow rows (no `**`). */
+function isStarArrowRow(trimmed: string): boolean {
+  return /^(?:\*|•)\s*(?:→|->)\s*\S/u.test(trimmed);
+}
+
+function boldProductLabelInArrowTail(tail: string): string {
+  const trimmed = tail.trim();
+  const match =
+    /^(\S+)\s+([\u4e00-\u9fffA-Za-z0-9][^（(]*?)(（[\s\S]*）)?$/.exec(trimmed);
+  if (!match) return trimmed;
+  const suffix = match[3] ?? "";
+  return `${match[1]} **${match[2].trim()}**${suffix}`;
+}
+
+function attachArrowRecommendationRow(
+  out: string[],
+  arrowPart: string,
+): void {
+  let k = out.length - 1;
+  while (k >= 0 && !out[k].trim()) k--;
+  const prevTrimmed = k >= 0 ? out[k].trim() : "";
+  const prevOpen = /^\*\*([^*\n]+)$/.exec(prevTrimmed);
+  const prevClosed = /^\*\*([^*\n]+)\*\*\s*$/.exec(prevTrimmed);
+  if (prevClosed) {
+    out[k] = `- **${prevClosed[1]}** ${arrowPart}`;
+  } else if (prevOpen) {
+    out[k] = `- **${prevOpen[1]}** ${arrowPart}`;
+  } else {
+    out.push(`- ${arrowPart}`);
+  }
+}
+
+/** Merge split conditional advice and `* -> …` pseudo-list rows into markdown bullets. */
+function repairBoldArrowFragmentRows(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    const starArrowMatch = /^(?:\*|•)\s*(?:→|->)\s*(.*)$/.exec(trimmed);
+    if (starArrowMatch) {
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      const nextTrimmed = lines[j]?.trim() ?? "";
+      const tail = starArrowMatch[1].trim();
+      if (nextTrimmed && !/^(?:\*|•|\*\*|-)\s/.test(nextTrimmed)) {
+        const arrowPart =
+          `-> ${tail ? `${tail} ` : ""}**${nextTrimmed.replace(/^\*\*|\*\*$/g, "")}**`.trim();
+        attachArrowRecommendationRow(out, arrowPart);
+        i = j + 1;
+        continue;
+      }
+      const arrowPart = `-> ${boldProductLabelInArrowTail(tail)}`.trim();
+      attachArrowRecommendationRow(out, arrowPart);
+      i++;
+      continue;
+    }
+
+    const arrowMatch = /^\*\*\s*(?:→|->)\s*(.*)$/.exec(trimmed);
+    if (arrowMatch) {
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      const nextTrimmed = lines[j]?.trim() ?? "";
+      const boldRest = /^\*\*([^*\n]+)\*\*(.*)$/.exec(nextTrimmed);
+      if (boldRest) {
+        const arrowPart =
+          `-> ${arrowMatch[1]} **${boldRest[1]}**${boldRest[2]}`.trim();
+        attachArrowRecommendationRow(out, arrowPart);
+        i = j + 1;
+        continue;
+      }
+    }
+    out.push(lines[i]);
+    i++;
+  }
+
+  return out.join("\n");
+}
+
+/** Fix `**label **` before an arrow so GFM can parse the bold span. */
+function repairSpacedBoldClosers(text: string): string {
+  return text.replace(/(\S)\s+\*\*\s*(->|→)/g, "$1** $2");
+}
+
+/** Turn unicode bullet glyphs into markdown list markers. */
+function normalizeUnicodeBullets(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (/^[•·‣▪]\s/.test(trimmed)) {
+        const leading = line.match(/^\s*/)?.[0] ?? "";
+        return `${leading}${trimmed.replace(/^[•·‣▪]\s/, "- ")}`;
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+/** True for ASCII workflow steps like `-> brain capture "..."` — prose, not diagrams. */
+function isWorkflowStepLine(trimmed: string): boolean {
+  return /^->\s+\S/.test(trimmed);
+}
+
 /** True when a fenced block's body is markdown prose mislabeled as yaml/json/etc. */
 function fenceContentIsMarkdown(body: string, lang: string): boolean {
   const trimmed = body.trim();
   if (!trimmed || !MISLABELED_FENCE_LANGS.has(lang)) return false;
-  if (isPlainDiagram(trimmed)) return false;
 
   const lines = trimmed.split("\n").filter((line) => line.trim() !== "");
+  if (hasBoldProseLines(trimmed)) return true;
+  // Bold recommendation rows must win over the diagram heuristic — a block of
+  // `**label** → …` lines carries arrows but is prose, not a box diagram.
+  if (lines.length > 0 && lines.every((line) => isBoldArrowProseLine(line.trim()))) {
+    return true;
+  }
+  if (
+    lines.some((line) => /^\*\*\s*(?:→|->)/.test(line.trim())) &&
+    lines.some((line) => /^\*\*[^*\n]+\*\*/.test(line.trim()))
+  ) {
+    return true;
+  }
+  if (lines.some((line) => isStarArrowRow(line.trim()))) return true;
+  if (lines.length > 0 && lines.every((line) => isMarkdownListLine(line.trim()))) {
+    return true;
+  }
+  if (isPlainDiagram(trimmed)) return false;
   const tableRows = lines.filter((line) => isTableLine(line.trim())).length;
   const listLines = lines.filter((line) => isMarkdownListLine(line.trim())).length;
   const hasMarkdownHeader = /^#{1,6}\s+\S/m.test(trimmed);
@@ -694,6 +932,12 @@ function fenceContentIsMarkdown(body: string, lang: string): boolean {
   const hasPipePrefixedProse = lines.some((line) =>
     /^\|\s*(?:-\s|\|\s*\S)/.test(line.trim()),
   );
+  const workflowLines = lines.filter((line) =>
+    isWorkflowStepLine(line.trim()),
+  ).length;
+
+  if (workflowLines >= 2) return true;
+  if (workflowLines >= 1 && lines.length > workflowLines) return true;
 
   if (hasMarkdownHeader && tableRows >= 1) return true;
   if (tableRows >= 2 && (hasMarkdownHeader || hasMarkdownBold || hasBoldMarkers)) {
@@ -705,10 +949,18 @@ function fenceContentIsMarkdown(body: string, lang: string): boolean {
   return false;
 }
 
+/** True when a mislabeled fence body should render as markdown, not monospace. */
+export function shouldRenderMislabeledFenceAsMarkdown(
+  body: string,
+  lang: string,
+): boolean {
+  return fenceContentIsMarkdown(body, lang.trim().toLowerCase());
+}
+
 /** Strip fences around markdown the model wrongly wrapped in yaml/json/text blocks. */
 function unwrapMislabeledFences(content: string): string {
   return content.replace(
-    /^```(\w*)\r?\n([\s\S]*?)\r?\n```/gm,
+    /^```(\w*)\r?\n([\s\S]*?)(?:\r?\n)?```/gm,
     (match, lang: string, body: string) => {
       if (fenceContentIsMarkdown(body, lang.trim().toLowerCase())) {
         return `\n\n${body.trim()}\n\n`;
@@ -816,6 +1068,31 @@ function wrapBareCodeBlocks(text: string): string {
   return out.join("\n");
 }
 
+/** Remove truncated fence markers glued to prose, e.g. `组织成自然 ``` `. */
+function stripStrayFenceMarkers(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (/^```/.test(trimmed)) return line;
+      return line.replace(/\s*`{3,}\s*$/g, "");
+    })
+    .join("\n");
+}
+
+/** Turn `-> step` workflow lines into markdown bullets for remark-gfm. */
+function normalizeWorkflowArrowLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!isWorkflowStepLine(trimmed)) return line;
+      const leading = line.match(/^\s*/)?.[0] ?? "";
+      return `${leading}- ${trimmed.replace(/^->\s+/, "")}`;
+    })
+    .join("\n");
+}
+
 /** Close an opening fence before trailing prose when the model omitted the closing ```. */
 function closeUnclosedFences(content: string): string {
   const lines = content.split("\n");
@@ -883,6 +1160,76 @@ const BOX_DRAWING_RE = /[\u2500-\u259F]/;
 const ASCII_DIAGRAM_RE =
   /(?:[|_]{3,}|[-=~─—]{4,}|[→←↑↓↔↕⟶⟵▶▷►]|[-─—]{2,}\s*[>→]|(?:→|←)\s*Agent\s+[A-Z]\b|Agent\s+[A-Z]\b.*(?:→|←|─|—|委托|协作))/;
 
+const ARROW_ONLY_RE = /^[→←↑↓↔↕⟶⟵▶▷►]$/;
+
+function isArrowOnlyLine(trimmed: string): boolean {
+  return ARROW_ONLY_RE.test(trimmed);
+}
+
+function nextNonBlankLineIndex(lines: string[], start: number): number {
+  for (let i = start; i < lines.length; i++) {
+    if (lines[i].trim() !== "") return i;
+  }
+  return -1;
+}
+
+/** Collapse entity-relation chains split across lines (`Alice` / `→` / `works_at`). */
+function normalizeEntityRelationChains(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    if (trimmed === "") {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    const nextIdx = nextNonBlankLineIndex(lines, i + 1);
+    const next = nextIdx >= 0 ? lines[nextIdx].trim() : "";
+
+    if (next && isArrowOnlyLine(next) && !isArrowOnlyLine(trimmed)) {
+      const leading = lines[i].match(/^\s*/)?.[0] ?? "";
+      const first = trimmed.replace(/^[-*+•]\s+/, "");
+      const parts = [first];
+      let j = nextIdx;
+
+      while (j < lines.length) {
+        const t = lines[j].trim();
+        if (!t) {
+          j++;
+          continue;
+        }
+        if (isArrowOnlyLine(t)) {
+          parts.push("→");
+          j++;
+          continue;
+        }
+        if (parts.at(-1) === "→") {
+          parts.push(t);
+          j++;
+          continue;
+        }
+        break;
+      }
+
+      if (parts.filter((part) => part === "→").length >= 1) {
+        const bullet = /^[-*+•]\s/.test(trimmed) ? "- " : "";
+        out.push(`${leading}${bullet}${parts.join(" ")}`);
+        i = j;
+        continue;
+      }
+    }
+
+    out.push(lines[i]);
+    i++;
+  }
+
+  return out.join("\n");
+}
+
 // Layer-stack triangles and bracket labels like [A2A 层] / [Agent A].
 const LAYER_DIAGRAM_RE =
   /[\u25BC-\u25BF\u25B2-\u25B5]|^\s*\[(?:Agent\s+[A-Z]|[^\]]*(?:层|Layer))\]\s*$|\[[^\]]+\].*(?:→|←|↓|↑|─|—|│|\||▼|▲)|^\s*[|│]\s*$|\+[-=+]+\+/;
@@ -903,10 +1250,14 @@ function looksLikeGluedTableLine(trimmed: string): boolean {
 /** True when a line carries box-drawing, flowchart, or layer-stack diagram glyphs. */
 export function isDiagramLine(line: string): boolean {
   const trimmed = line.trim();
-  if (!trimmed || isTableLine(trimmed) || looksLikeGluedTableLine(trimmed)) {
+  if (!trimmed || isArrowOnlyLine(trimmed)) return false;
+  if (isWorkflowStepLine(trimmed)) return false;
+  if (isTableLine(trimmed) || looksLikeGluedTableLine(trimmed)) {
     return false;
   }
   if (isMarkdownListLine(trimmed)) return false;
+  if (isBoldArrowProseLine(trimmed)) return false;
+  if (isStarArrowRow(trimmed)) return false;
   if (/^```/.test(trimmed)) return false;
   return (
     BOX_DRAWING_RE.test(line) ||
@@ -922,7 +1273,16 @@ export function isPlainDiagram(code: string): boolean {
   const lines = code.split("\n").filter((line) => line.trim() !== "");
   if (lines.length === 0) return false;
 
+  const workflowLines = lines.filter((line) =>
+    isWorkflowStepLine(line.trim()),
+  ).length;
+  if (workflowLines >= 2) return false;
+  if (workflowLines >= 1 && workflowLines * 2 >= lines.length) return false;
+
   if (lines.every((line) => isMarkdownListLine(line.trim()))) return false;
+  if (hasBoldProseLines(code)) return false;
+  if (lines.every((line) => isBoldArrowProseLine(line.trim()))) return false;
+  if (lines.every((line) => isStarArrowRow(line.trim()))) return false;
 
   const diagramLines = lines.filter((line) => isDiagramLine(line)).length;
   const hasLayerMarker = lines.some((line) => LAYER_MARKER_RE.test(line.trim()));
@@ -936,6 +1296,7 @@ export function isPlainDiagram(code: string): boolean {
 function isDiagramContinuationLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed) return false;
+  if (isWorkflowStepLine(trimmed)) return false;
   if (isDiagramLine(trimmed)) return true;
   if (looksLikeCodeLine(line)) return false;
   if (isTableLine(trimmed)) return false;
@@ -961,6 +1322,7 @@ function qualifiesAsDiagramBlock(blockLines: string[]): boolean {
   if (diagramCount >= 2) return true;
   if (
     diagramCount >= 1 &&
+    nonBlank.length >= 2 &&
     nonBlank.length <= 10 &&
     nonBlank.every(
       (line) =>
@@ -1077,6 +1439,11 @@ function repairBrokenBoldMarkers(text: string): string {
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
+    const trimmed = line.trim();
+    if (/^\*\*\s*(?:→|->)/.test(trimmed)) {
+      out.push(line);
+      continue;
+    }
     const asteriskRuns = (line.match(/\*\*/g) || []).length;
     if (
       asteriskRuns % 2 === 1 &&
@@ -1129,11 +1496,18 @@ function normalizePipeComparisonBlocks(text: string): string {
 export function normalizeAgentMarkdown(content: string): string {
   if (!content) return content;
 
-  let s = unwrapMislabeledFences(content);
+  let s = stripStrayFenceMarkers(content);
   s = closeUnclosedFences(s);
+  s = unwrapMislabeledFences(s);
 
   return transformOutsideCode(s, (text) => {
-    let t = repairBrokenBoldMarkers(text);
+    let t = repairBoldArrowFragmentRows(text);
+    t = repairBrokenBoldMarkers(t);
+    t = repairSpacedBoldClosers(t);
+    t = normalizeBoldRecommendationRows(t);
+    t = normalizeUnicodeBullets(t);
+    t = normalizeWorkflowArrowLines(t);
+    t = normalizeEntityRelationChains(t);
     t = normalizeGluedTreeDiagrams(t);
     t = wrapBareDiagramBlocks(t);
     t = wrapBareCodeBlocks(t);

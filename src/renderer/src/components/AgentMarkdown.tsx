@@ -8,6 +8,7 @@ import {
   describeImageSrc,
   isPlainDiagram,
   normalizeAgentMarkdown,
+  shouldRenderMislabeledFenceAsMarkdown,
 } from "../screens/Chat/mediaUtils";
 import { THEMES } from "../constants";
 import { useTheme } from "./ThemeProvider";
@@ -138,10 +139,14 @@ function CodeBlock({
   const rawLanguage = match ? match[1] : "";
   const prismLanguage = resolvePrismLanguage(rawLanguage, code);
   const isDiff = prismLanguage === "diff";
+  const mislabeledMarkdown =
+    !isDiff &&
+    shouldRenderMislabeledFenceAsMarkdown(code, rawLanguage);
   // Diffs win over the box-diagram check: DiffView is already a plain per-line
   // renderer (no Prism), so it has no fragmentation risk, and a patch touching
   // a tree diagram must keep its colored +/- view.
-  const boxDiagram = !isDiff && isPlainDiagram(code);
+  const boxDiagram =
+    !isDiff && !mislabeledMarkdown && isPlainDiagram(code);
 
   const linesCount = code.split("\n").length;
   const isLong = linesCount > 15 || code.length > 800;
@@ -160,6 +165,10 @@ function CodeBlock({
     void window.hermesAPI.copyToClipboard(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  if (mislabeledMarkdown) {
+    return <AgentMarkdown>{code}</AgentMarkdown>;
   }
 
   const codeContent = isDiff ? (

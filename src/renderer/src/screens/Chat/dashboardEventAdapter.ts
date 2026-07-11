@@ -400,6 +400,24 @@ function primaryHeading(text: string): string | null {
   return match ? normalizeText(match[0]) : null;
 }
 
+/** True when two headings are the same or one is a truncated prefix of the other. */
+function headingsMatch(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  if (longer.startsWith(shorter) && shorter.length >= 16) return true;
+  // Streamed heading closed parens early: "## Foo（bar）" vs "## Foo（bar+baz）".
+  const stem = shorter.replace(/[）)]\s*$/, "");
+  return stem.length >= 16 && longer.startsWith(stem);
+}
+
+/** First bold sentence / opener — stable anchor for spotting document rewrites. */
+function documentOpener(text: string): string | null {
+  const match = text.match(/^\*\*[^*]+\*\*[^*\n]*/);
+  return match ? normalizeText(match[0]) : null;
+}
+
 /**
  * Length of the longest suffix of `a` that is also a prefix of `b`, used to
  * stitch a re-streamed boundary without duplicating the shared run. The
@@ -499,11 +517,34 @@ export function mergeStreamedWithFinal(
   const streamedHeading = primaryHeading(streamedContent);
   const finalHeading = primaryHeading(finalContent);
   if (
-    streamedHeading &&
-    streamedHeading === finalHeading &&
+    headingsMatch(streamedHeading, finalHeading) &&
     shorterNorm >= 200 &&
     sharedPrefix >= 40 &&
     finalContent.length >= streamedContent.length * 0.75
+  ) {
+    return finalContent;
+  }
+
+  // Truncated/garbled stream that shares most of its body with a fuller final
+  // rewrite (e.g. CJK tokens dropped mid-stream, then final_response resends
+  // the whole answer). Prefer the clean final instead of stacking both copies.
+  if (
+    shorterNorm >= 120 &&
+    sharedPrefix >= 60 &&
+    sharedPrefix / shorterNorm >= 0.45 &&
+    (finalContent.length >= streamedContent.length ||
+      sharedPrefix / normFinal.length >= 0.45)
+  ) {
+    return finalContent;
+  }
+
+  const streamedOpener = documentOpener(streamedContent);
+  const finalOpener = documentOpener(finalContent);
+  if (
+    streamedOpener &&
+    streamedOpener === finalOpener &&
+    sharedPrefix >= 40 &&
+    finalContent.length > streamedContent.length
   ) {
     return finalContent;
   }

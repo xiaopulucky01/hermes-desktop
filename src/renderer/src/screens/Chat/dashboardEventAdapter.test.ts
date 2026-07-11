@@ -156,6 +156,60 @@ describe("mergeStreamedWithFinal", () => {
 
     expect(mergeStreamedWithFinal(garbled, clean)).toBe(clean);
   });
+
+  it("prefers final when garbled partial stream shares the same document opener", () => {
+    const garbled = [
+      "**不需要手动输入命令。** 那只是一种最基础的 CLI 用法。",
+      "",
+      "## 实际使用方式（从简单到）",
+      "",
+      "### 方式 1：手动 CLI（测试用，不推荐日常用）",
+      "```手动执行",
+      'g决定了：用 Monaco Editor"',
+      "```",
+      "这只是让你验证 GBrain 是否正常工作日常不需要这样用**。",
+      "",
+      "---",
+      "",
+      "### 方式 2：Hermes Agent 自动调用（推荐）",
+      "",
+      "安装 GBrain 后43 个 Skills**到 Hermes。这些 会教 Agent：",
+      "- 什么时候- 什么时候该- 如何自动建图",
+    ].join("\n");
+    const clean = [
+      "**不需要手动输入命令。** 那只是一种最基础的 CLI 用法。",
+      "",
+      "## 实际使用方式（从简单到高级）",
+      "",
+      "### 方式 1：手动 CLI（测试用，不推荐日常用）",
+      "```bash",
+      "# 在终端里手动执行",
+      'gbrain capture "今天决定了：用 Monaco Editor"',
+      "```",
+      "这只是让你验证 GBrain 是否正常工作，**日常不需要这样用**。",
+      "",
+      "---",
+      "",
+      "### 方式 2：Hermes Agent 自动调用（推荐）",
+      "",
+      "安装 GBrain 后，它会加载 **43 个 Skills** 到 Hermes。这些 Skill 会教 Agent：",
+      "- 什么时候该 capture",
+      "- 什么时候该 search/think",
+      "- 如何自动建图",
+      "",
+      "**你只需要正常对话，Agent 会自动判断：**",
+      "",
+      "## 总结",
+      "",
+      "| 使用方式 | 是否需要手动输入命令 | 适用场景 |",
+      "|---------|-------------------|---------|",
+      "| CLI 手动 | ✅ 需要 | 测试、调试、批量导入 |",
+      "",
+      "**最终目标：你正常说话，Agent 自动处理一切。**",
+    ].join("\n");
+
+    expect(mergeStreamedWithFinal(garbled, clean)).toBe(clean);
+  });
 });
 
 describe("applyDashboardStreamEvent — message.complete text reconciliation", () => {

@@ -6,6 +6,7 @@ import {
   cleanLeakedToolTags,
   normalizeAgentMarkdown,
   isPlainDiagram,
+  shouldRenderMislabeledFenceAsMarkdown,
   type MediaSegment,
 } from "./mediaUtils";
 
@@ -535,6 +536,23 @@ describe("isPlainDiagram", () => {
     ].join("\n");
     expect(isPlainDiagram(code)).toBe(false);
   });
+
+  it("does not treat bold arrow recommendation rows as plain diagrams", () => {
+    const code = [
+      "**如果追求快速变现** → 方向 5（自媒体运营）或 方向 1（客服）",
+      "**如果追求高客单价** → 方向 2（研究分析）或 方向 6（企业中台）",
+    ].join("\n");
+    expect(isPlainDiagram(code)).toBe(false);
+  });
+
+  it("detects mislabeled text fences with bold arrow recommendation rows", () => {
+    const body = [
+      "**如果追求快速变现** → 方向 5（自媒体运营）或 方向 1（客服）",
+      "**如果追求高客单价** → 方向 2（研究分析）或 方向 6（企业中台）",
+    ].join("\n");
+    expect(shouldRenderMislabeledFenceAsMarkdown(body, "text")).toBe(true);
+    expect(shouldRenderMislabeledFenceAsMarkdown(body, "txt")).toBe(true);
+  });
 });
 
 describe("normalizeAgentMarkdown", () => {
@@ -773,6 +791,40 @@ describe("normalizeAgentMarkdown", () => {
     expect(out).not.toContain("```");
   });
 
+  it("unwraps a text fence around bold arrow recommendation rows", () => {
+    const raw = [
+      "```text",
+      "**如果追求快速变现** → 方向 5（自媒体运营）或 方向 1（客服）",
+      "**如果追求高客单价** → 方向 2（研究分析）或 方向 6（企业中台）",
+      "**如果追求用户粘性** → 方向 3（教育导师）",
+      "**如果追求技术壁垒** → 方向 4（智能家居）",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("```");
+    expect(out).toContain("**如果追求快速变现**");
+    expect(out).toContain("**如果追求技术壁垒**");
+  });
+
+  it("does not wrap bare bold arrow recommendation rows in text fences", () => {
+    const raw = [
+      "**如果追求快速变现** → 方向 5 (自媒体运营) 或 方向 1 (客服)",
+      "**如果追求高客单价** → 方向 2 (研究分析) 或 方向 6 (企业中台)",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("- **如果追求快速变现**");
+    expect(out).toContain("- **如果追求高客单价**");
+    expect(out).not.toContain("```");
+  });
+
+  it("splits one glued recommendation line into a bullet list", () => {
+    const raw =
+      "如果追求快速变现 → 方向 5（自媒体运营）或 方向 1（客服） 如果追求高客单价 → 方向 2（研究分析）或 方向 6（企业中台）";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("- 如果追求快速变现 →");
+    expect(out).toContain("- 如果追求高客单价 →");
+  });
+
   it("unwraps a text fence around a numbered bold list", () => {
     const raw = [
       "```text",
@@ -805,5 +857,119 @@ describe("normalizeAgentMarkdown", () => {
     const raw = "为什么不能完全1. **Hermes Memory 的核心价值查询###海量、长期、需要";
     const out = normalizeAgentMarkdown(raw);
     expect(out).toMatch(/###\s+海量/);
+  });
+
+  it("collapses entity-relation chains split across arrow-only lines", () => {
+    const raw = [
+      "• Alice",
+      "→",
+      "works_at",
+      "→",
+      "Acme",
+      "• Bob",
+      "→",
+      "invested_in",
+      "→",
+      "StartupX",
+      "• Meeting",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("- Alice → works_at → Acme");
+    expect(out).toContain("- Bob → invested_in → StartupX");
+    expect(out).toContain("- Meeting");
+    expect(out).not.toContain("```text");
+  });
+
+  // @lat: [[code-blocks#LLM markdown normalization]]
+  it("unwraps a text fence of workflow arrow steps into a bullet list", () => {
+    const raw = [
+      "```text",
+      "-> 检测到决策",
+      '-> brain capture "决定 替代 VS Code"',
+      "-> 自动提取实体: VS Code, 产品经理",
+      "-> 自动建立关系: 项目 -> uses **你不需要说---**",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("```");
+    expect(out).toContain("- 检测到决策");
+    expect(out).toContain('- brain capture "决定 替代 VS Code"');
+    expect(out).toContain("**你不需要说---**");
+  });
+
+  it("unwraps a mixed prose and workflow text fence", () => {
+    const raw = [
+      "```text",
+      "我们讨论产品定价时决定了什么?",
+      "(内部自动执行",
+      '  -> 调用 gbrain think "产品定价"',
+      "  -> 返回综合答案 + 引用 + 知识空白分析",
+      "  -> 组织成自然语言回复",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("```");
+    expect(out).toContain("我们讨论产品定价时决定了什么?");
+    expect(out).toContain('- 调用 gbrain think "产品定价"');
+    expect(out).toContain("- 返回综合答案 + 引用 + 知识空白分析");
+  });
+
+  it("strips stray trailing fence markers glued to prose", () => {
+    const raw = "-> 组织成自然 ```";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toBe("- 组织成自然");
+    expect(out).not.toContain("```");
+  });
+
+  it("unwraps text fences with star-arrow pseudo list rows", () => {
+    const raw = [
+      "**如果你没有明确答案",
+      "",
+      "```text",
+      "* -> 做 开发者工具",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("```");
+    expect(out).toContain("- **如果你没有明确答案** -> 做 **开发者工具**");
+  });
+
+  it("preserves inline tail bold on a single conditional advice row", () => {
+    const raw = "**如果你没有跨境电商经验** → 做**开发者工具**";
+    expect(normalizeAgentMarkdown(raw)).toBe(raw);
+  });
+
+  it("repairs conditional advice with split bold-arrow text fences", () => {
+    const raw = [
+      "最终建议",
+      "",
+      "**如果你没有跨境电商经验",
+      "",
+      "```text",
+      "** -> 做",
+      "**开发者工具**",
+      "```",
+      "",
+      "• 你最懂这个群体",
+      "• 技术优势最大",
+      "",
+      "**如果你有跨境电商经验或资源 ** -> 可以做 跨境电商",
+      "",
+      "**如果没有明确答案",
+      "",
+      "```text",
+      "** -> 先做",
+      "**开发者工具**（风险最低、优势最大）",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("```");
+    expect(out).toContain("- **如果你没有跨境电商经验** -> 做 **开发者工具**");
+    expect(out).toContain("- 你最懂这个群体");
+    expect(out).toContain("**如果你有跨境电商经验或资源** -> 可以做 跨境电商");
+    expect(out).toContain(
+      "- **如果没有明确答案** -> 先做 **开发者工具**（风险最低、优势最大）",
+    );
+    expect(out).not.toMatch(/^\*\* -> /m);
   });
 });

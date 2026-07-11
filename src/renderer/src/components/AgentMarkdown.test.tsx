@@ -410,6 +410,71 @@ describe("AgentMarkdown", () => {
     expect(container.textContent).not.toContain("**记忆**");
   });
 
+  it("renders bold arrow recommendation rows as markdown instead of plain code blocks", () => {
+    const markdown = [
+      "```text",
+      "**如果追求快速变现** → 方向 5（自媒体运营）或 方向 1（客服）",
+      "**如果追求高客单价** → 方向 2（研究分析）或 方向 6（企业中台）",
+      "**如果追求用户粘性** → 方向 3（教育导师）",
+      "**如果追求技术壁垒** → 方向 4（智能家居）",
+      "```",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-plain")).toBeNull();
+    expect(container.querySelectorAll("strong").length).toBeGreaterThanOrEqual(4);
+    expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(4);
+    expect(container.textContent).toContain("如果追求快速变现");
+    expect(container.textContent).not.toContain("**如果追求快速变现**");
+  });
+
+  it("renders glued recommendation rows on one line as separate list items", () => {
+    const markdown =
+      "如果追求快速变现 → 方向 5（自媒体运营）或 方向 1（客服） 如果追求高客单价 → 方向 2（研究分析）或 方向 6（企业中台） 如果追求用户粘性 → 方向 3（教育导师） 如果追求技术壁垒 → 方向 4（智能家居）";
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(4);
+    expect(container.textContent).toContain("如果追求快速变现");
+    expect(container.textContent).toContain("如果追求技术壁垒");
+  });
+
+  it("renders star-arrow text fences as list items with bold labels", () => {
+    const markdown = [
+      "**如果你没有明确答案",
+      "",
+      "```text",
+      "* -> 先做 开发者工具（风险最低、优势最大）",
+      "```",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-block")).toBeNull();
+    expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(1);
+    expect(container.querySelectorAll("strong").length).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).toContain("开发者工具");
+  });
+
+  it("renders split conditional advice blocks without text fences", () => {
+    const markdown = [
+      "**如果你没有跨境电商经验",
+      "",
+      "```text",
+      "** -> 做",
+      "**开发者工具**",
+      "```",
+      "",
+      "• 你最懂这个群体",
+      "**如果你有跨境电商经验或资源 ** -> 可以做 跨境电商",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-block")).toBeNull();
+    expect(container.querySelectorAll("strong").length).toBeGreaterThanOrEqual(3);
+    expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(2);
+    expect(container.textContent).toContain("开发者工具");
+    expect(container.textContent).not.toContain("** -> 做");
+  });
+
   it("unwraps a text fence with pipe-prefixed pseudo-list lines", () => {
     const markdown = [
       "```text",
@@ -432,5 +497,52 @@ describe("AgentMarkdown", () => {
     const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
     expect(container.querySelector("h3")).not.toBeNull();
     expect(container.textContent).toContain("海量");
+  });
+
+  it("renders knowledge-graph entity chains instead of empty arrow code blocks", () => {
+    const markdown = [
+      "每次写入页面时，自动提取实体关系，不需要调用 LLM:",
+      "",
+      "• Alice",
+      "→",
+      "works_at",
+      "→",
+      "Acme",
+      "• Bob",
+      "→",
+      "invested_in",
+      "→",
+      "StartupX",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-block")).toBeNull();
+    expect(container.textContent).toContain("Alice → works_at → Acme");
+    expect(container.textContent).toContain("Bob → invested_in → StartupX");
+  });
+
+  it("renders GBrain workflow steps as a bullet list, not a collapsed code block", () => {
+    const markdown = normalizeAgentMarkdown(
+      [
+        "**方式 2: Hermes Agent 自动调用（推荐）**",
+        "",
+        "```text",
+        "-> 检测到决策",
+        '-> brain capture "决定 替代 VS Code"',
+        "-> 自动提取实体: VS Code, 产品经理",
+        "-> 自动建立关系: 项目 -> uses **你不需要说---**",
+        "```",
+      ].join("\n"),
+    );
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-code-block")).toBeNull();
+    expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(4);
+    expect(container.textContent).toContain("检测到决策");
+    expect(container.textContent).toContain("你不需要说");
+    expect(
+      [...container.querySelectorAll("strong")].some((el) =>
+        el.textContent?.includes("你不需要说"),
+      ),
+    ).toBe(true);
   });
 });
