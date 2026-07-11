@@ -1093,8 +1093,24 @@ function normalizeWorkflowArrowLines(text: string): string {
     .join("\n");
 }
 
-/** Close an opening fence before trailing prose when the model omitted the closing ```. */
-function closeUnclosedFences(content: string): string {
+/** True when a line inside an open fence is markdown prose, not source code. */
+function looksLikeProseInFence(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/^#{1,6}(\s|$)/.test(trimmed)) return true;
+  if (/^#{1,6}(?=[\u4e00-\u9fffA-Za-z])/.test(trimmed)) return true;
+  if (isTableLine(trimmed)) return true;
+  if (/^[-*+•·]\s/.test(trimmed)) return true;
+  if (/^\*\*/.test(trimmed)) return true;
+  if (/\*\*[^*\n]+\*\*/.test(trimmed)) return true;
+  if (/^[\u4e00-\u9fff][^\n]{0,48}[:：]\s*$/.test(trimmed)) return true;
+  if (/\)[\w\u4e00-\u9fff][^\n]*\*\*/.test(trimmed)) return true;
+  if (/^[\u4e00-\u9fff\w][^\n]*\*\*[^\n]*[:：]/.test(trimmed)) return true;
+  return false;
+}
+
+/** Close one opening fence before trailing prose when the model omitted the closing ```. */
+function closeOneUnclosedFence(content: string): string {
   const lines = content.split("\n");
   let openIndex = -1;
   let depth = 0;
@@ -1111,13 +1127,27 @@ function closeUnclosedFences(content: string): string {
   for (let i = openIndex + 1; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
-    if (!looksLikeCodeLine(lines[i]) && !/^```/.test(trimmed)) {
+    if (
+      looksLikeProseInFence(lines[i]) ||
+      (!looksLikeCodeLine(lines[i]) && !/^```/.test(trimmed))
+    ) {
       lines.splice(i, 0, "```");
       return lines.join("\n");
     }
   }
 
   return `${content}\n\`\`\``;
+}
+
+/** Close every opening fence before trailing prose when the model omitted closing ```. */
+function closeUnclosedFences(content: string): string {
+  let result = content;
+  let prev = "";
+  while (result !== prev) {
+    prev = result;
+    result = closeOneUnclosedFence(result);
+  }
+  return result;
 }
 
 // Tree/box connectors in LLM output — Unicode box drawing, tree glyphs, or
@@ -1440,6 +1470,10 @@ function repairBrokenBoldMarkers(text: string): string {
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
     const trimmed = line.trim();
+    if (isTableLine(trimmed)) {
+      out.push(line);
+      continue;
+    }
     if (/^\*\*\s*(?:→|->)/.test(trimmed)) {
       out.push(line);
       continue;
@@ -1451,7 +1485,11 @@ function repairBrokenBoldMarkers(text: string): string {
       i + 1 < lines.length
     ) {
       const nextTrimmed = lines[i + 1].trim();
-      if (nextTrimmed && !nextTrimmed.startsWith("**")) {
+      if (
+        nextTrimmed &&
+        !nextTrimmed.startsWith("**") &&
+        !isTableLine(nextTrimmed)
+      ) {
         line = `${line.trimEnd()}${nextTrimmed}`;
         i++;
       }

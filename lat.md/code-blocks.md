@@ -34,17 +34,21 @@ Additional repair passes run before the prose-only table fixes:
 
 - **Mislabeled fences** — when a `yaml`/`json`/`text` block actually contains markdown headings, bold markers (`**`), pipe-prefixed pseudo-list rows (`|- item`, `| | item`), workflow arrow steps (`-> step`), bold recommendation rows (`**label** → …`), or tables, the fence is stripped so remark-gfm can render the table instead of showing raw pipes inside a code block. If normalization misses a fence, [[src/renderer/src/components/AgentMarkdown.tsx]]'s `CodeBlock` falls back to rendering the body as markdown instead of monospace. Box diagrams inside `text` fences are left fenced.
 - **Workflow arrow steps** — `-> step` lines (agent workflow narration, not box diagrams) are unwrapped from `text` fences, converted to markdown bullets, and never plain-rendered as collapsed code blocks. Stray trailing ` ``` ` glued to prose (e.g. a truncated fence marker) is stripped before fence repair runs.
-- **Broken bold** — bold markers split across lines (`**标题` + `正文**`) are merged, and dangling `**` on a row are closed so later emphasis parses correctly.
+- **Broken bold** — bold markers split across lines (`**标题` + `正文**`) are merged, and dangling `**` on a row are closed so later emphasis parses correctly. Table rows are skipped so cell text with parentheses or partial emphasis is not corrupted.
 - **Recommendation rows** — vertical-scenario rows like `**如果追求 X** → 方向 N …`, and star-prefixed pseudo rows like `* -> 做 开发者工具`, are split when glued on one line and turned into bullet list items so GFM renders one row per line. Splitting only breaks at row labels followed by an arrow (`**label** →`), not at inline tail emphasis (`→ 做**开发者工具**`), so well-formed conditional advice stays on one line. Split conditional advice (`** -> 做` / `**开发者工具**` text fences, dangling `**如果…` openers, spaced ` **` closers, and `•` bullets) is merged back into markdown list rows before rendering.
 - **Glued headings** — `###标题` (no space after hashes) is broken onto its own line with a space inserted before the title text.
 - **Entity-relation chains** — knowledge-graph examples that put each `→` on its own line (`Alice` / `→` / `works_at` / `→` / `Acme`) are collapsed into one list row (`- Alice → works_at → Acme`). Lone arrow-only lines are not treated as diagram blocks, so they no longer render as empty `text` code boxes.
 - **Bare code** — consecutive lines that look like source (e.g. `app.get(…)`, `res.json(…)` without an opening fence) are wrapped in a detected-language fence so Prism can highlight them.
-- **Unclosed fences** — a missing closing ` ``` ` before trailing prose is inserted so later markdown is not swallowed as code.
+- **Unclosed fences** — a missing closing ` ``` ` before trailing prose is inserted so later markdown is not swallowed as code. Detection also treats markdown headings, bold markers, tables, and section labels inside an open fence as prose boundaries, and repeats until every stray opening fence is closed.
 - **Glued tree diagrams** — one-line agent/skill tree output glued with `|` separators (e.g. `TypeScript 大师 (Agent) └── SOUL.md … | └── skills/ …`) is split onto separate lines and wrapped in a `text` fence so it renders in monospace `pre` instead of wrapping as prose.
 - **Bare layer diagrams** — multi-line MCP/A2A stack diagrams with bracket labels, vertical connectors, and agent arrows but no opening fence are wrapped in a `text` fence so they align in monospace `pre`.
 - **Pipe-comparison tiers** — product-tier lines that glue columns with `| | - item` (not valid GFM) become a `###` heading plus bullet list.
 
 Tables are wrapped in `.chat-table-wrap` for horizontal scroll only; cell typography matches the original agent-bubble table styles. Parsed `h1`–`h4` inside `.chat-bubble-agent` inherit body `font-weight` (not semibold) so repaired headings like `### 1. …` do not look bolder than surrounding prose. `strong` / `b` use `font-weight: 600` so Tailwind preflight does not make emphasis invisible.
+
+## Empty code blocks during streaming
+
+While a fence is still streaming, react-markdown can momentarily pass `undefined` code children. [[src/renderer/src/components/AgentMarkdown.tsx]] coerces those to an empty string and skips rendering the block shell so the UI never shows the literal word `undefined`.
 
 ## Syntax highlighting palette
 

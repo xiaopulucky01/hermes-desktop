@@ -79,6 +79,20 @@ const PLAIN_CODE_STYLE: React.CSSProperties = {
   whiteSpace: "pre",
 };
 
+/** Coerce react-markdown code children to text without rendering "undefined". */
+function codeChildrenToString(children: React.ReactNode): string {
+  if (children == null) return "";
+  if (typeof children === "string") return children.replace(/\n$/, "");
+  if (Array.isArray(children)) {
+    return children
+      .map((child) => (child == null ? "" : String(child)))
+      .join("")
+      .replace(/\n$/, "");
+  }
+  const text = String(children);
+  return text === "undefined" ? "" : text.replace(/\n$/, "");
+}
+
 // Diff viewer with colored +/- lines
 function DiffView({ code }: { code: string }): React.JSX.Element {
   const lines = code.split("\n");
@@ -134,7 +148,8 @@ function CodeBlock({
   const [highlighterReady, setHighlighterReady] = useState(
     () => _highlighterMod !== null && prismStyle !== null,
   );
-  const code = String(children).replace(/\n$/, "");
+  const code = codeChildrenToString(children);
+  if (!code) return <></>;
   const match = /language-(\S+)/.exec(className || "");
   const rawLanguage = match ? match[1] : "";
   const prismLanguage = resolvePrismLanguage(rawLanguage, code);
@@ -296,14 +311,13 @@ const AgentMarkdown = memo(function AgentMarkdown({
           </div>
         ),
         code: ({ className, children, node, ...props }) => {
+          const codeText = codeChildrenToString(children);
           const isInline =
-            !className &&
-            typeof children === "string" &&
-            !children.includes("\n");
+            !className && codeText.length > 0 && !codeText.includes("\n");
           if (isInline) {
             return (
               <code className={className} {...props}>
-                {children}
+                {codeText}
               </code>
             );
           }
@@ -317,7 +331,7 @@ const AgentMarkdown = memo(function AgentMarkdown({
               : undefined;
           return (
             <CodeBlock className={className} blockId={blockId}>
-              {children}
+              {codeText}
             </CodeBlock>
           );
         },

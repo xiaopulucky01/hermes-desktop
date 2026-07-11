@@ -664,6 +664,40 @@ describe("normalizeAgentMarkdown", () => {
     expect(out.match(/```/g)?.length).toBe(2);
   });
 
+  it("closes an unclosed python fence before a markdown heading", () => {
+    const raw = [
+      "```python",
+      'researcher = Agent(role="研究员", goal="收集信息")',
+      'writer = Agent(role="编辑", goal="写文章")',
+      "crew = Crew(researcher, writer)",
+      "",
+      "### LangGraph (底层控制)",
+      "```python",
+      "class MyGraph:",
+      "    pass",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("crew = Crew(researcher, writer)");
+    expect(out).toContain("### LangGraph (底层控制)");
+    expect(out.indexOf("### LangGraph")).toBeGreaterThan(
+      out.indexOf("crew = Crew"),
+    );
+    expect(out).toContain("class MyGraph:");
+  });
+
+  it("does not corrupt table rows while repairing broken bold markers", () => {
+    const raw = [
+      "| 维度 | crewAI | LangGraph |",
+      "| --- | --- | --- |",
+      "| 抽象层级 | 高 (Agent/Task) | 低 (State/Node/Edge) |",
+      "| 控制力 | 强 (有限) | 弱 |",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| 抽象层级 | 高 (Agent/Task) | 低 (State/Node/Edge) |");
+    expect(out).toContain("| 控制力 | 强 (有限) | 弱 |");
+  });
+
   it("turns pipe-comparison tier lines into heading plus bullet list", () => {
     const raw =
       "Hermes Agent 基础功能 | | - 3 个默认角色 | | - 基础 Skills | | 开源核心 (免费) | |";

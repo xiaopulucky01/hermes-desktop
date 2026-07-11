@@ -545,4 +545,28 @@ describe("AgentMarkdown", () => {
       ),
     ).toBe(true);
   });
+
+  it("does not render the literal word undefined for an empty code block", () => {
+    const markdown = ["条件分支: 审核不通过就打回重写", "", "```text", "```"].join(
+      "\n",
+    );
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.textContent).toContain("条件分支");
+    expect(container.textContent).not.toContain("undefined");
+    expect(container.querySelector(".chat-code-block")).toBeNull();
+  });
+
+  it("renders comparison tables with parenthesized cell values intact", () => {
+    const markdown = [
+      "| 维度 | crewAI | LangGraph |",
+      "| --- | --- | --- |",
+      "| 抽象层级 | 高 (Agent/Task) | 低 (State/Node/Edge) |",
+      "| 控制力 | 强 (有限) | 弱 |",
+    ].join("\n");
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-table-wrap table")).not.toBeNull();
+    expect(container.textContent).toContain("高 (Agent/Task)");
+    expect(container.textContent).toContain("低 (State/Node/Edge)");
+    expect(container.textContent).toContain("强 (有限)");
+  });
 });
