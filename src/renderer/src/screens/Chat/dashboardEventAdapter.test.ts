@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import {
   applyDashboardStreamEvent,
+  looksGarbledMarkdown,
   mergeStreamedWithFinal,
   type DashboardEventState,
 } from "./dashboardEventAdapter";
@@ -154,6 +155,31 @@ describe("mergeStreamedWithFinal", () => {
       "需要我深入某个方面吗？",
     ].join("\n");
 
+    expect(mergeStreamedWithFinal(garbled, clean)).toBe(clean);
+  });
+
+  it("prefers clean final when streamed text looks garbled", () => {
+    const garbled = [
+      '"object", "properties": {} }, "required" ] } }, handler=self.handle_a2a',
+      "async def handle_a2a_send(url, args):",
+      '    result = .dumps(card, ensure_三=False)',
+      "",
+      "| 维度 | MCP | A2A |",
+      "|------|-----|| **连接对象 ↔ 工具/数据 | Agent ↔ Agent |",
+    ].join("\n");
+    const clean = [
+      "```python",
+      "async def handle_a2a_send(url, args):",
+      '    result = json.dumps(card, ensure_ascii=False)',
+      "```",
+      "",
+      "| 维度 | MCP | A2A |",
+      "| --- | --- | --- |",
+      "| **连接对象** | 模型 ↔ 工具/数据 | Agent ↔ Agent |",
+    ].join("\n");
+
+    expect(looksGarbledMarkdown(garbled)).toBe(true);
+    expect(looksGarbledMarkdown(clean)).toBe(false);
     expect(mergeStreamedWithFinal(garbled, clean)).toBe(clean);
   });
 

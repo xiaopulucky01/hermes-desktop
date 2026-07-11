@@ -258,10 +258,16 @@ function CodeBlock({
 // Shared Markdown renderer that opens links externally
 const AgentMarkdown = memo(function AgentMarkdown({
   children,
+  streaming = false,
 }: {
   children: string;
+  /** True while the parent message is still generating — lighter normalization. */
+  streaming?: boolean;
 }): React.JSX.Element {
-  const normalized = useMemo(() => normalizeAgentMarkdown(children), [children]);
+  const normalized = useMemo(
+    () => normalizeAgentMarkdown(children, { streaming }),
+    [children, streaming],
+  );
   return (
     <Markdown
       remarkPlugins={[remarkGfm]}

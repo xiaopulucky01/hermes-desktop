@@ -418,6 +418,32 @@ function documentOpener(text: string): string | null {
   return match ? normalizeText(match[0]) : null;
 }
 
+/** True when streamed assistant text shows common LLM formatting corruption. */
+// @lat: [[chat-commands#Completion text reconciliation]]
+export function looksGarbledMarkdown(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  let score = 0;
+  const patterns = [
+    /"object"\s*,\s*"properties"/,
+    /\}\s*\]\s*\}\s*,?\s*(?:handler=|async\s+def|def\s+)/,
+    /\bresult\s*=\s*\.\s*dumps\b/,
+    /\bA\s+load_\w+\s*\(/,
+    /\bensure_\p{Script=Han}/u,
+    /\basync\s+with\b[^;\n]{0,80}\breturn\b/,
+    /\bimport\s+\w+\s*\([^)]*从/,
+  ];
+  for (const re of patterns) {
+    if (re.test(trimmed)) score++;
+  }
+  if (/\|\s*\|\s*\*\*/.test(trimmed)) score++;
+  const opens = (trimmed.match(/[\[{]/g) || []).length;
+  const closes = (trimmed.match(/[\]}]/g) || []).length;
+  if (opens >= 4 && closes >= 4 && Math.abs(opens - closes) >= 3) score++;
+  return score >= 2;
+}
+
 /**
  * Length of the longest suffix of `a` that is also a prefix of `b`, used to
  * stitch a re-streamed boundary without duplicating the shared run. The
@@ -493,6 +519,16 @@ export function mergeStreamedWithFinal(
   if (normFinal.includes(normStreamed)) return finalContent;
   if (normStreamed.includes(normFinal)) return streamedContent;
 
+  const streamedGarbled = looksGarbledMarkdown(streamedContent);
+  const finalGarbled = looksGarbledMarkdown(finalContent);
+  if (
+    streamedGarbled &&
+    !finalGarbled &&
+    finalContent.length >= streamedContent.length * 0.4
+  ) {
+    return finalContent;
+  }
+
   const overlap = tailHeadOverlap(streamedContent, finalContent);
   if (overlap > 0) return `${streamedContent}${finalContent.slice(overlap)}`;
 
@@ -545,6 +581,14 @@ export function mergeStreamedWithFinal(
     streamedOpener === finalOpener &&
     sharedPrefix >= 40 &&
     finalContent.length > streamedContent.length
+  ) {
+    return finalContent;
+  }
+  if (
+    streamedGarbled &&
+    streamedOpener &&
+    streamedOpener === finalOpener &&
+    finalContent.length >= streamedContent.length * 0.6
   ) {
     return finalContent;
   }

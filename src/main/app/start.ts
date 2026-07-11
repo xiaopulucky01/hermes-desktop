@@ -81,6 +81,7 @@ export function startMainProcess(): void {
           "Content-Security-Policy": [
             "default-src 'self'; " +
               "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " +
+              "worker-src 'self' blob:; " +
               "style-src 'self' 'unsafe-inline'; " +
               "img-src 'self' data: blob: file: https:; " +
               "media-src 'self' data: blob: file: https:; " +

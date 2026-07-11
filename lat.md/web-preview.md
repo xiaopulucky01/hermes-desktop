@@ -18,3 +18,9 @@ The preview is the only webview allowed to load remote HTTPS; all others stay re
 The session comparison is deliberate: `getLastWebPreferences()` is not a public Electron API (returns `undefined`), so reading attributes back from the attached webContents is unreliable — the partition session is the only signal available in `web-contents-created`. Without it, redirects (e.g. `google.com` → `www.google.com`) and subsequent navigations are wrongly blocked even though the initial attach succeeded.
 
 Remote pages still run fully sandboxed: `hardenWebviewPreferences` forces `nodeIntegration:false`, `contextIsolation:true`, `sandbox:true`, `webSecurity:true` and deletes any preload, so loading arbitrary HTTPS grants the page no host or Node access.
+
+## Load errors and CSP
+
+[[src/renderer/src/screens/Chat/WebPreviewPanel.tsx#WebPreviewPanel]] drives navigation only through the declarative `<webview src={currentUrl}>` binding — imperative `webview.src = …` assignments race React updates and produce benign `ERR_ABORTED (-3)` noise on redirects and quick URL changes, so `did-fail-load` ignores `-3` and subframe failures.
+
+The renderer CSP in [[src/renderer/index.html]] and [[src/main/app/start.ts]] includes `worker-src 'self' blob:` so Vite's dev HMR client can spawn its blob-backed worker without violating `script-src`.

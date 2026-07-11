@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { AgentMarkdown } from "./src/renderer/src/components/AgentMarkdown";
+import { AgentMarkdown } from "../../components/AgentMarkdown";
 
 vi.mock("./src/renderer/src/components/useI18n", () => ({
   useI18n: () => ({ t: (key: string) => key }),

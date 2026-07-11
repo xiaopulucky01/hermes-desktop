@@ -21,6 +21,7 @@ const packagedAssetSources = [
   "img-src 'self' data: blob: file: https:",
   "media-src 'self' data: blob: file: https:",
   "font-src 'self' data:",
+  "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",
 ];

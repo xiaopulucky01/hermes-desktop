@@ -973,6 +973,66 @@ describe("normalizeAgentMarkdown", () => {
     expect(normalizeAgentMarkdown(raw)).toBe(raw);
   });
 
+  it("relabels a text fence with Python source as python", () => {
+    const raw = [
+      "```text",
+      "import httpx",
+      "class A2AClientPlugin(HermesPlugin):",
+      '    name = "a2a_client"',
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("```python");
+    expect(out).not.toContain("```text");
+    expect(out).toContain('name = "a2a_client"');
+  });
+
+  it("wraps JSON schema fragments glued before Python on one line", () => {
+    const raw =
+      '"object", "properties": {} }, "required" ] } }, handler=self.handle_a2a async def handle_a2a_send(url, args):';
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("```python");
+    expect(out).toContain("async def handle_a2a_send");
+    expect(out).not.toContain('"object", "properties"');
+  });
+
+  it("wraps bare CLI command lines in a bash fence", () => {
+    const raw =
+      "然后加 CLI 命令 add research-team http://localhost:8001 hermes a2a remove research-team";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("```bash");
+    expect(out).toContain("add research-team http://localhost:8001");
+  });
+
+  it("wraps bare pipe-separated rows missing outer pipes", () => {
+    const raw = "简介 | 快速验证 | 1-2周";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toBe("| 简介 | 快速验证 | 1-2周 |");
+  });
+
+  it("wraps bare async Python lines outside fences", () => {
+    const raw = [
+      "核心实现：",
+      "async def handle_a2a_send(url, args):",
+      '    message = args["message"]',
+      "    return json.dumps(result, ensure_ascii=False)",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("```python");
+    expect(out).toContain("async def handle_a2a_send");
+    expect(out).toContain("ensure_ascii=False");
+  });
+
+  it("skips fence closing while streaming", () => {
+    const raw = [
+      "```python",
+      "def load_registry():",
+      "    return {}",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw, { streaming: true });
+    expect(out).toBe(raw);
+  });
+
   it("repairs conditional advice with split bold-arrow text fences", () => {
     const raw = [
       "最终建议",

@@ -353,7 +353,10 @@ export const MessageRow = memo(function MessageRow({
                     // every subsequent index, which would otherwise re-mount
                     // each downstream MediaSegmentView and re-fire its
                     // `mediaFileExists` probe.
-                    <AgentMarkdown key={`t-${segment.start}`}>
+                    <AgentMarkdown
+                      key={`t-${segment.start}`}
+                      streaming={isLoading && isLast}
+                    >
                       {segment.value}
                     </AgentMarkdown>
                   ) : null

@@ -970,16 +970,135 @@ function unwrapMislabeledFences(content: string): string {
   );
 }
 
+const GENERIC_FENCE_LANGS = new Set(["text", "txt", "plaintext", "plain", ""]);
+
+/** True when a fenced body is source code mislabeled as text/plain. */
+function fenceContentLooksLikeCode(body: string): boolean {
+  const lines = body
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return false;
+  const codeLines = lines.filter((line) => looksLikeCodeLine(line)).length;
+  return codeLines >= 2 || (codeLines >= 1 && lines.length <= 4);
+}
+
+/** Relabel generic `text` fences that actually contain source code. */
+function relabelMislabeledCodeFences(content: string): string {
+  return content.replace(
+    /^```(\w*)\r?\n([\s\S]*?)(?:\r?\n)?```/gm,
+    (match, lang: string, body: string) => {
+      const normalizedLang = lang.trim().toLowerCase();
+      if (!GENERIC_FENCE_LANGS.has(normalizedLang)) return match;
+      if (fenceContentIsMarkdown(body, normalizedLang)) return match;
+      if (!fenceContentLooksLikeCode(body)) return match;
+      const detected = detectBareCodeLanguage(body);
+      return `\`\`\`${detected}\n${body}\n\`\`\``;
+    },
+  );
+}
+
+/** Split JSON schema fragments glued onto trailing Python on one prose line. */
+function splitGluedJsonCodeLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("|") || trimmed.startsWith("```")) {
+        return line;
+      }
+      const codeStart = trimmed.search(
+        /\b(?:(?:async\s+)?def\s+\w|class\s+\w|handler\s*=\s*self\.\w+)/,
+      );
+      if (codeStart <= 0) return line;
+      const prefix = trimmed.slice(0, codeStart).trim();
+      const code = trimmed.slice(codeStart).trim();
+      if (
+        prefix &&
+        /"[\w/]+"\s*:|"properties"|"required"|\}\s*\]/.test(prefix)
+      ) {
+        return `\`\`\`${detectBareCodeLanguage(code)}\n${code}\n\`\`\``;
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+/** Wrap bare CLI command runs the model left in prose. */
+function wrapBareCliLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("```") || trimmed.startsWith("|")) {
+        return line;
+      }
+      const cliMatch =
+        /^(?:然后加\s+)?(?:CLI\s+命令\s+)?((?:[a-z][\w-]*\s+(?:https?:\/\/\S+|[\w./-]+)(?:\s+[a-z][\w-]*)*)+)$/i.exec(
+          trimmed,
+        );
+      if (!cliMatch) return line;
+      const commands = cliMatch[1].trim();
+      if (!/\s(?:add|remove|list|run)\s/i.test(commands) && !/https?:\/\//.test(commands)) {
+        return line;
+      }
+      return `\`\`\`bash\n${commands}\n\`\`\``;
+    })
+    .join("\n");
+}
+
+/** Wrap table-like rows that omit the outer leading/trailing pipes. */
+function repairBarePipeRows(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("|") || trimmed.endsWith("|")) {
+        return line;
+      }
+      const parts = trimmed.split(/\s*\|\s*/).map((part) => part.trim());
+      if (parts.length < 2 || parts.length > 4) return line;
+      if (parts.some((part) => !part)) return line;
+      if (parts.every((part) => /^[-:]{3,}$/.test(part))) return line;
+      if (
+        parts.some(
+          (part) =>
+            part.length > 40 ||
+            /\b(for|the|and|with|answer)\b/i.test(part) ||
+            (/\.\s*$/.test(part) && part.split(/\s+/).length >= 3),
+        )
+      ) {
+        return line;
+      }
+      return formatTableRow(parts);
+    })
+    .join("\n");
+}
+
+export interface NormalizeAgentMarkdownOptions {
+  /** When true, skip repairs that mis-parse partial streamed content. */
+  streaming?: boolean;
+}
+
 const BARE_CODE_PATTERNS = [
   /^\s*\/\/(?:\s|$)/,
   /^\s*\/\*/,
   /^\s*\*\//,
   /^\s*#include\b/,
   /^\s*import\s+(?:\{|\w)/,
+  /^\s*from\s+[\w.]+\s+import\b/,
+  /^\s*@\w+/,
   /^\s*export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|var)/,
   /^\s*(?:const|let|var)\s+\w/,
+  /^\s*\w+\s*=/,
+  /^\s*(?:async\s+)?def\s+\w/,
   /^\s*(?:async\s+)?function\s+\w/,
   /^\s*class\s+\w/,
+  /^\s*self\.\w+/,
+  /^\s*await\s+\w/,
+  /^\s*return\s+/,
+  /^\s*handler\s*=/,
   /^\s*app\.(?:get|post|put|delete|patch|use|listen)\b/,
   /^\s*router\./,
   /^\s*module\.exports/,
@@ -989,7 +1108,7 @@ const BARE_CODE_PATTERNS = [
   /^\s*\}\s*\)\s*;?\s*$/,
   /^\s*\}\s*;?\s*$/,
   /^\s*\)\s*=>\s*\{/,
-  /^\s*\w+\s*\(\s*(?:req|res|err)\b/,
+  /^\s*\w+\s*\(\s*(?:req|res|err|self)\b/,
   /^\S['"]\s*,\s*\(\s*(?:req|res)\b/,
   /^\s*\w+\.\w+\([^)]*\)\s*;?\s*$/,
   /^\s*\}\)\s*;?\s*$/,
@@ -1009,6 +1128,13 @@ function looksLikeCodeLine(line: string): boolean {
 
 function detectBareCodeLanguage(block: string): string {
   const sample = block.trim().slice(0, 4000);
+  if (
+    /\b(?:async\s+)?def\s+\w+/.test(sample) ||
+    /^\s*@\w+/m.test(sample) ||
+    /^\s*from\s+[\w.]+\s+import/m.test(sample)
+  ) {
+    return "python";
+  }
   if (
     /app\.(?:get|post|put|delete|patch|use|listen)\b/.test(sample) ||
     /res\.(?:json|send|status)\b/.test(sample) ||
@@ -1531,11 +1657,18 @@ function normalizePipeComparisonBlocks(text: string): string {
  * headings. Scoped to prose only — code fences are never touched.
  */
 // @lat: [[code-blocks#LLM markdown normalization]]
-export function normalizeAgentMarkdown(content: string): string {
+export function normalizeAgentMarkdown(
+  content: string,
+  options: NormalizeAgentMarkdownOptions = {},
+): string {
   if (!content) return content;
+  const streaming = options.streaming === true;
 
   let s = stripStrayFenceMarkers(content);
-  s = closeUnclosedFences(s);
+  if (!streaming) {
+    s = closeUnclosedFences(s);
+  }
+  s = relabelMislabeledCodeFences(s);
   s = unwrapMislabeledFences(s);
 
   return transformOutsideCode(s, (text) => {
@@ -1547,8 +1680,13 @@ export function normalizeAgentMarkdown(content: string): string {
     t = normalizeWorkflowArrowLines(t);
     t = normalizeEntityRelationChains(t);
     t = normalizeGluedTreeDiagrams(t);
-    t = wrapBareDiagramBlocks(t);
-    t = wrapBareCodeBlocks(t);
+    if (!streaming) {
+      t = splitGluedJsonCodeLines(t);
+      t = wrapBareCliLines(t);
+      t = repairBarePipeRows(t);
+      t = wrapBareDiagramBlocks(t);
+      t = wrapBareCodeBlocks(t);
+    }
     t = normalizePipeComparisonBlocks(t);
     t = normalizePipePrefixedListLines(t);
 

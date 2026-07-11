@@ -233,13 +233,13 @@ export const WebPreviewPanel = memo(function WebPreviewPanel({
     isInspectingRef.current = isInspecting;
   }, [isInspecting]);
 
-  // Sync initialUrl prop to internal state when it changes from parent
+  // Sync initialUrl prop to internal state when it changes from parent.
+  // Navigation is driven by the declarative `src={currentUrl}` on <webview>;
+  // avoid also setting webview.src imperatively — that races React and
+  // triggers ERR_ABORTED (-3) on the superseded load.
   useEffect(() => {
     setCurrentUrl(initialUrl);
     setInputUrl(initialUrl);
-    if (webviewRef.current) {
-      webviewRef.current.src = initialUrl;
-    }
   }, [initialUrl]);
 
   // Inject or clean up the inspector script based on isInspecting state
@@ -310,11 +310,17 @@ export const WebPreviewPanel = memo(function WebPreviewPanel({
     };
 
     const handleDidFailLoad = (e: Event): void => {
-      const { validatedURL, errorCode, errorDescription } = e as unknown as {
-        validatedURL: string;
-        errorCode: number;
-        errorDescription: string;
-      };
+      const { validatedURL, errorCode, errorDescription, isMainFrame } =
+        e as unknown as {
+          validatedURL: string;
+          errorCode: number;
+          errorDescription: string;
+          isMainFrame?: boolean;
+        };
+      // ERR_ABORTED (-3) is expected when a load is superseded (redirect,
+      // address-bar navigation, reload). Subframe failures are also noisy.
+      if (errorCode === -3) return;
+      if (isMainFrame === false) return;
       console.error(
         `[WEBVIEW ERROR] Failed to load: ${validatedURL}, Code: ${errorCode}, Description: ${errorDescription}`,
       );
@@ -409,9 +415,6 @@ export const WebPreviewPanel = memo(function WebPreviewPanel({
 
     setInputUrl(targetUrl);
     setCurrentUrl(targetUrl);
-    if (webviewRef.current) {
-      webviewRef.current.src = targetUrl;
-    }
   };
 
   return (
