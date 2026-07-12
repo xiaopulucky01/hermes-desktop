@@ -6,7 +6,7 @@ Windows installers ship a self-contained Python runtime under `resources/python/
 
 When `resources/python` is present (dev tree or packaged `extraResources`), [[src/main/bundled-runtime.ts#resolveBundledPythonDir]] points the desktop at that runtime instead of `%LOCALAPPDATA%\\hermes\\hermes-agent\\venv`.
 
-[[src/main/installer.ts#shouldUseBundledEngine]] skips the Welcome install flow when the bundled interpreter is available and no traditional venv install exists. User config and sessions live under `%LOCALAPPDATA%\\AI-Compartner` (or `HERMES_HOME` when set).
+[[src/main/installer.ts#shouldUseBundledEngine]] skips the Welcome install flow when the bundled interpreter is available and no traditional venv install exists. User config and sessions live under `%LOCALAPPDATA%\\hermes` (or `HERMES_HOME` when set).
 
 Set `HERMES_BUNDLED_RUNTIME=0` to force the legacy online installer path.
 
