@@ -5,6 +5,7 @@
 node_modules/
 resources/playwright-browsers
 resources/python
+resources/hermes-a2a
 
 # Build output
 dist/

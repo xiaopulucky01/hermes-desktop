@@ -23,12 +23,13 @@
     "dev:fresh": "HERMES_HOME=$(mktemp -d -t hermes-fresh) electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
-    "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "npm run build && electron-builder --win",
+    "build:unpack": "npm run stage-hermes-a2a && npm run build && electron-builder --dir",
+    "build:win": "npm run stage-hermes-a2a && npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
     "build:rpm": "npm run build && electron-builder --linux rpm",
     "prepare-runtime": "node scripts/prepare-runtime.mjs",
+    "stage-hermes-a2a": "node scripts/stage-hermes-a2a.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

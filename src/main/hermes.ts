@@ -28,6 +28,7 @@ import {
   getHermesPythonSpawnPath,
   formatHermesSpawnError,
 } from "./installer";
+import { ensureA2aConfig, ensureA2aEnv, isA2aPluginAvailable } from "./a2a-plugin";
 import {
   getApiServerKey,
   getConnectionConfig,
@@ -3058,6 +3059,10 @@ export function buildGatewayEnv(profile?: string): Record<string, string> {
   // Make sure this profile's config.yaml enables the api_server and binds the
   // profile's own port before we spawn.
   ensureApiServerConfig(profile);
+  if (isA2aPluginAvailable(HERMES_HOME)) {
+    ensureA2aConfig(profile);
+    ensureA2aEnv(profile);
+  }
   const port = getProfilePort(profile);
 
   const gatewayEnv: Record<string, string> = {

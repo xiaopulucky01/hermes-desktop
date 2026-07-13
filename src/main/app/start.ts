@@ -22,6 +22,7 @@ import {
 } from "../security";
 import { registerIpcHandlers } from "../ipc/register";
 import { setGatewayPromptParent } from "../gatewayPrompt";
+import { bootGatewayAndA2aOnAppStart } from "./gateway-boot";
 import { showChatContextMenu } from "./context-menu";
 import { buildMenu } from "./menu";
 import { setupUpdater } from "./updater";
@@ -97,6 +98,7 @@ export function startMainProcess(): void {
 
     createWindow();
     buildMenu({ getMainWindow: () => mainWindow, openExternalUrl });
+    bootGatewayAndA2aOnAppStart();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
