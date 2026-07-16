@@ -185,6 +185,31 @@ describe("remote dashboard API client", () => {
     expect(requestRemoteOAuthJson).not.toHaveBeenCalled();
   });
 
+  it("normalizes auto authentication probe failures before selecting transport", async () => {
+    probeRemoteAuthMode.mockRejectedValue(
+      new RemoteOAuthError(
+        "Remote OAuth probe failed (404).",
+        "oauth_request_failed",
+        404,
+      ),
+    );
+
+    await expect(
+      remoteDashboardRequestJson(
+        remoteConnection("auto"),
+        "/api/tools/toolsets",
+      ),
+    ).rejects.toMatchObject({
+      name: "RemoteDashboardApiError",
+      statusCode: 404,
+      unsupported: true,
+    });
+
+    expect(probeRemoteAuthMode).toHaveBeenCalledOnce();
+    expect(remoteRequestJson).not.toHaveBeenCalled();
+    expect(requestRemoteOAuthJson).not.toHaveBeenCalled();
+  });
+
   it("omits default profile query parameter", async () => {
     requestRemoteOAuthJson.mockResolvedValue([]);
     await remoteDashboardRequestJson(
@@ -209,6 +234,7 @@ describe("remote dashboard API client", () => {
     ).rejects.toThrow("direct Remote mode");
     expect(remoteRequestJson).not.toHaveBeenCalled();
     expect(requestRemoteOAuthJson).not.toHaveBeenCalled();
+    expect(probeRemoteAuthMode).not.toHaveBeenCalled();
   });
 
   it("normalizes token HTTP failures with a structured status", async () => {
