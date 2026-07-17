@@ -15,11 +15,33 @@ import { captureScreenView } from "./utils/analytics";
 type Screen = "splash" | "welcome" | "installing" | "setup" | "main";
 
 // Minimum time the splash stays visible so the background video plays
-// through. Gateway / config checks happen during this window.
+// through. Gateway / config checks happen during this window. Remounts in
+// the same webContents session (e.g. Vite HMR full-reload after sleep) skip
+// this delay so waking the laptop doesn't look like a cold start.
 const SPLASH_MIN_MS = 3000;
+const BOOT_SESSION_KEY = "hermes.desktop.bootPassed";
+
+function hasPassedBootThisSession(): boolean {
+  try {
+    return sessionStorage.getItem(BOOT_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markBootPassedThisSession(): void {
+  try {
+    sessionStorage.setItem(BOOT_SESSION_KEY, "1");
+  } catch {
+    /* sessionStorage may be unavailable */
+  }
+}
 
 function App(): React.JSX.Element {
-  const [screen, setScreen] = useState<Screen>("splash");
+  // Remount after Vite HMR (common after Windows sleep) should not flash splash.
+  const [screen, setScreen] = useState<Screen>(() =>
+    hasPassedBootThisSession() ? "main" : "splash",
+  );
   const [installError, setInstallError] = useState<string | null>(null);
   const [connectionMode, setConnectionMode] = useState<
     "local" | "remote" | "ssh"
@@ -111,8 +133,18 @@ function App(): React.JSX.Element {
     setSplashStatus(undefined);
     if (error) setInstallError(error);
 
+    // Same Electron session remount (sleep → soft reload) already passed boot;
+    // skip the decorative minimum splash wait. Fresh launches still wait.
+    // Also refuse to bounce a mid-session remount to Welcome on a flaky probe
+    // (gateway/dashboard still waking after sleep) — that looked like being
+    // kicked out of the open chat.
+    const skipMinSplash = hasPassedBootThisSession();
+    if (skipMinSplash && (next === "welcome" || next === "setup")) {
+      next = "main";
+    }
+    markBootPassedThisSession();
     const elapsed = Date.now() - startedAt;
-    const wait = Math.max(0, SPLASH_MIN_MS - elapsed);
+    const wait = skipMinSplash ? 0 : Math.max(0, SPLASH_MIN_MS - elapsed);
     if (wait > 0) {
       await new Promise((r) => setTimeout(r, wait));
     }

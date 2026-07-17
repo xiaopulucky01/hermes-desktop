@@ -70,6 +70,12 @@ rpm:
   # Same SUID fix for .rpm consumers (Fedora 40+ also restricts userns).
   afterInstall: build/linux-after-install.sh
 npmRebuild: false
+# Avoid the legacy winCodeSign-2.6.0.7z bundle: it ships macOS .dylib
+# symlinks that 7-Zip cannot create without Windows Developer Mode / admin
+# ("客户端没有所需的特权"). The 1.x toolset downloads Windows-only zips
+# (rcedit, kits) instead — see app-builder-lib toolsets.winCodeSign.
+toolsets:
+  winCodeSign: "1.1.0"
 publish:
   provider: github
   owner: fathah

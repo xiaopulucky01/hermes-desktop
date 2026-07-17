@@ -16,6 +16,11 @@ import {
   runIdAtOrdinal,
   loadingSessionIds as deriveLoadingSessionIds,
 } from "./chatRuns";
+import {
+  chatRunsFromPersistedShell,
+  loadPersistedChatShell,
+  persistChatShell,
+} from "./chatShellPersistence";
 import { ActiveSessionsBar } from "./ActiveSessionsBar";
 import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
@@ -104,9 +109,39 @@ function Layout({
   // a ChatRun; all are mounted, only the active one is shown. Profile switches
   // preserve existing conversations and activate a scratch run for the selected
   // agent so `activeProfile` stays aligned with the visible chat transport.
-  const [activeProfile, setActiveProfile] = useState("default");
-  const [runs, setRuns] = useState<ChatRun[]>(() => [mintRun("default")]);
-  const [activeRunId, setActiveRunId] = useState<string>(() => runs[0].runId);
+  // Restored from sessionStorage after sleep/wake remounts so open tabs survive.
+  const bootShellRef = useRef<{
+    activeProfile: string;
+    activeRunId: string;
+    runs: ChatRun[];
+  } | null>(null);
+  if (!bootShellRef.current) {
+    const shell = loadPersistedChatShell();
+    if (shell) {
+      const restored = chatRunsFromPersistedShell(shell);
+      bootShellRef.current = {
+        activeProfile: shell.activeProfile,
+        activeRunId: restored.activeRunId,
+        runs: restored.runs,
+      };
+    } else {
+      const run = mintRun("default");
+      bootShellRef.current = {
+        activeProfile: "default",
+        activeRunId: run.runId,
+        runs: [run],
+      };
+    }
+  }
+  const [activeProfile, setActiveProfile] = useState(
+    () => bootShellRef.current!.activeProfile,
+  );
+  const [runs, setRuns] = useState<ChatRun[]>(
+    () => bootShellRef.current!.runs,
+  );
+  const [activeRunId, setActiveRunId] = useState(
+    () => bootShellRef.current!.activeRunId,
+  );
   // While a resume's history is loading, show its spinner immediately.
   const [resumingSessionId, setResumingSessionId] = useState<string | null>(
     null,
@@ -128,6 +163,20 @@ function Layout({
 
   const currentSessionId =
     runs.find((r) => r.runId === activeRunId)?.sessionId ?? null;
+
+  // Keep open chat tabs across soft remounts (sleep → renderer reload).
+  useEffect(() => {
+    persistChatShell({
+      activeProfile,
+      activeRunId,
+      runs: runs.map((r) => ({
+        runId: r.runId,
+        profile: r.profile,
+        sessionId: r.sessionId,
+        ...(r.title ? { title: r.title } : {}),
+      })),
+    });
+  }, [activeProfile, activeRunId, runs]);
 
   const loadingSessionIds = useMemo(
     () => deriveLoadingSessionIds(runs),

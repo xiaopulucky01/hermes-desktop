@@ -1166,6 +1166,12 @@ export function useDashboardChatTransport({
               if (clientRef.current === client) {
                 clientRef.current = null;
               }
+              // Sleep/wake (and dashboard process recycle) invalidate the live
+              // runtime session. Keep storedSessionId so the next connect can
+              // session.resume instead of submitting against a dead id.
+              runtimeSessionIdRef.current = null;
+              appliedModelRef.current = null;
+              lastSyncedCwdRef.current = null;
             },
           });
           try {
@@ -1709,6 +1715,29 @@ export function useDashboardChatTransport({
     },
     [],
   );
+
+  // After sleep/resume the dashboard WS is often already closed. Warm the
+  // reconnect as soon as the window is visible again so the open chat isn't
+  // left on a dead socket until the next send.
+  useEffect(() => {
+    if (!enabled) return;
+    const warm = (): void => {
+      if (document.visibilityState !== "visible") return;
+      if (clientRef.current?.connected) return;
+      void ensureClient().catch(() => {
+        // Best-effort; the next sendMessage retries with full error handling.
+      });
+    };
+    const onVisible = (): void => {
+      warm();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [enabled, ensureClient]);
 
   return {
     abort,

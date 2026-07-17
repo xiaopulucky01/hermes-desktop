@@ -10,6 +10,7 @@ import icon from "../../../resources/icon.png?asset";
 import { getPublicConnectionConfig } from "../config";
 import { stopHealthPolling } from "../hermes";
 import { stopAllDashboards } from "../dashboard";
+import { stopAllAgentServices } from "../agent-services/supervisor";
 import { cleanupTempMediaFiles } from "../media";
 import { closeDbConnection } from "../db";
 import { stopSshTunnel } from "../ssh-tunnel";
@@ -115,6 +116,7 @@ export function startMainProcess(): void {
     activeRuns.clear();
     cleanupTempMediaFiles();
     stopAllDashboards();
+    stopAllAgentServices();
     // Kill the SSH tunnel process on quit — otherwise the `ssh -N -L` child is
     // orphaned (reparented to PID 1) and keeps holding its local port, so each
     // relaunch leaks another tunnel and the port drifts (18642 → 61799 → …).

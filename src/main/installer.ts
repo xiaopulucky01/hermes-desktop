@@ -345,7 +345,9 @@ export function getHermesCliSpawnError(): string | null {
 /** Turn spawn ENOENT into an actionable message for the bundled dev runtime. */
 // @lat: [[bundled-runtime#Spawn executable]]
 export function formatHermesSpawnError(
-  err: NodeJS.ErrnoException,
+  // Accept both `ErrnoException` (spawn) and `ExecFileException` (execFile):
+  // the latter allows `code` to be a number or null.
+  err: { code?: string | number | null; message: string },
   attemptedPath: string,
 ): string {
   if (err.code === "ENOENT") {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, Code2, Copy, Download, ExternalLink, Loader } from "lucide-react";
-import type { AcpLaunchInfo } from "../../../shared/acp";
+import type { AcpLaunchInfo } from "../../../../shared/acp";
 import { useI18n } from "../useI18n";
 
 const ACP_DOCS_URL =

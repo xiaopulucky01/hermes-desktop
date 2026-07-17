@@ -410,6 +410,60 @@ describe("AgentMarkdown", () => {
     expect(container.textContent).not.toContain("**记忆**");
   });
 
+  it("drops a messy glued-list draft when a clean numbered rewrite follows", () => {
+    const markdown = [
+      "根据我对 Hermes Agent 和 Hermes Desktop 代码库的搜索，没有找到名为 \"Agent Reach\" 的功能。你可能是指以下某个功能？",
+      "",
+      "**Gateway（多平台网关）** — 让 Hermes Agent 连接 Telegram、Discord 等 20+ 消息平台，达。2. **A2A（Agent-to-Agent）** — Hermes Desktop 里已经接入的 A2A 协议支持。3. **远程连接（Remote/SSH）** — 通过 SSH 隧道连接远程 Hermes4. **Webhook** — 外部服务通过 webhook 触发。",
+      "",
+      "你能描述一下是在哪里看到 \"Agent Reach\" 这个名字的吗？",
+      "",
+      "根据我对 Hermes Agent 和 Hermes Desktop 代码库的搜索，没有找到名为 \"Agent Reach\" 的功能。你可能是指以下某个相近的功能：",
+      "",
+      "1. **Gateway（多平台网关）** — 让 Hermes Agent 连接 Telegram、Discord 等 20+ 消息平台的网关。",
+      "2. **A2A（Agent-to-Agent）** — Hermes Desktop 里已经接入的 A2A 协议支持。",
+      "3. **远程连接（Remote/SSH）** — 通过 SSH 隧道连接远程 Hermes。",
+      "4. **Webhook** — 外部服务通过 webhook 触发 Hermes Agent。",
+      "",
+      "你能描述一下是在哪里看到 \"Agent Reach\" 这个名字的吗？这样我可以帮你更准确定位。",
+    ].join("\n");
+
+    const normalized = normalizeAgentMarkdown(markdown);
+    expect((normalized.match(/没有找到名为/g) || []).length).toBe(1);
+    expect(normalized).not.toMatch(/平台，达。2\./);
+    expect(normalized).not.toMatch(/Hermes4\.\s*\*\*/);
+    expect(normalized).toContain("1. **Gateway");
+    expect(normalized).toContain("4. **Webhook");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelectorAll("li").length).toBeGreaterThanOrEqual(4);
+    expect(container.textContent).toContain("Gateway");
+    expect(container.textContent).not.toContain("**Gateway");
+    // Messy truncated fragment must not appear
+    expect(container.textContent).not.toContain("平台，达");
+  });
+
+  it("splits CJK-glued numbered bold lists onto separate lines", () => {
+    const markdown = [
+      "你可能想找的是这些：",
+      "",
+      "**Gateway（多平台网关）** — 连接 Telegram、Discord 等。2. **A2A（Agent-to-Agent）** — 内置协议。Hermes4. **Webhook** — 外部触发。",
+    ].join("\n");
+
+    const normalized = normalizeAgentMarkdown(markdown);
+    expect(normalized).toContain("等。\n\n2. **A2A");
+    expect(normalized).toContain("Hermes\n\n4. **Webhook**");
+    expect(normalized).not.toMatch(/等。2\.\s*\*\*/);
+    expect(normalized).not.toMatch(/Hermes4\.\s*\*\*/);
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelectorAll("strong").length).toBeGreaterThanOrEqual(3);
+    expect(container.textContent).toContain("Gateway");
+    expect(container.textContent).toContain("A2A");
+    expect(container.textContent).toContain("Webhook");
+    expect(container.textContent).not.toContain("**Gateway");
+  });
+
   it("renders bold arrow recommendation rows as markdown instead of plain code blocks", () => {
     const markdown = [
       "```text",

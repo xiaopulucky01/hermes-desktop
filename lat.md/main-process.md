@@ -12,7 +12,13 @@ The Electron main process keeps the entrypoint small and separates app lifecycle
 
 Hardware acceleration is disabled and persisted after a GPU-process crash so machines without a usable GPU avoid an infinite crash → relaunch loop — but only temporarily, so a transient crash can't strand a working GPU on SwiftShader.
 
-[[src/main/gpu-fallback.ts#applyGpuPreferences]] disables hardware acceleration when a crash flag, relaunch sentinel, or `HERMES_DISABLE_GPU` says so, while keeping SwiftShader WebGL available. Persistent GPU-off fallback is honored by default on Windows/Linux, but macOS clears stale flags unless `HERMES_GPU_FALLBACK=1` forces it, protecting the Office tab from permanent software-rendering lag. [[src/main/gpu-fallback.ts#installGpuCrashGuard]] watches fatal GPU-process exits and relaunches with software rendering where the persistent fallback is enabled.
+[[src/main/gpu-fallback.ts#applyGpuPreferences]] disables hardware acceleration when a crash flag, relaunch sentinel, or `HERMES_DISABLE_GPU` says so, while keeping SwiftShader WebGL available. Persistent GPU-off fallback is honored by default on Windows/Linux, but macOS clears stale flags unless `HERMES_GPU_FALLBACK=1` forces it, protecting the Office tab from permanent software-rendering lag. [[src/main/gpu-fallback.ts#installGpuCrashGuard]] records fatal GPU-process exits for the next launch but never auto-relaunches the running app.
+
+### Sleep and wake
+
+The app must not auto-relaunch itself after sleep, idle GPU blips, or a few minutes in the background — only a user quit, OS shutdown, or an explicit Settings restart should recycle the process.
+
+[[src/main/gpu-fallback.ts#installGpuCrashGuard]] ignores GPU exits during suspend and a 60s post-resume grace window; otherwise it may persist `disable-gpu.flag` for the *next* manual launch but never calls `app.relaunch`/`app.exit`. Under `npm run dev`, HMR and file watching stay off by default (`HERMES_DEV_HMR=1` / `npm run dev:hmr` opts in) so Vite cannot remount the UI after sleep. Same-session remounts still skip the decorative splash via `sessionStorage` ([[src/renderer/src/App.tsx#App]]), refuse to demote mid-session remounts to Welcome on a flaky install probe, and restore open chat tabs ([[sidebar-navigation#Open chat tabs]]).
 
 ### Flag expiry
 
@@ -24,7 +30,7 @@ GPU crashes are often transient (driver update mid-session, a since-removed virt
 
 Settings → Appearance offers a tri-state hardware-acceleration preference — Auto (crash-guard driven, the default), Always on, Always off — persisted in `gpu-preference.json` beside the crash flag.
 
-The preference lives in `userData`, not renderer settings storage, because [[src/main/gpu-fallback.ts#getGpuPreference]] must read it synchronously before app-ready — the only point where hardware acceleration can still be disabled. Precedence is `HERMES_DISABLE_GPU` env (support escape hatch) > relaunch sentinel (a crash still rescues the current session even under "Always on") > preference > crash flag. Under "Always on" the crash guard relaunches with the sentinel but skips persisting the flag, so every subsequent launch retries hardware acceleration; "Always off" suppresses the crash guard and the Office banner's re-enable button (the banner points at Settings instead). [[src/main/gpu-fallback.ts#setGpuPreference]] writes the file (IPC `set-gpu-preference`, validated in the main process); changes apply after a relaunch via [[src/main/gpu-fallback.ts#relaunchApp]] (IPC `relaunch-app`). The Appearance pane (`src/renderer/src/components/settings/AppearancePane.tsx`) compares the saved preference against the `bootPreference` captured by [[src/main/gpu-fallback.ts#applyGpuPreferences]] so its "restart to apply" prompt survives closing and reopening Settings.
+The preference lives in `userData`, not renderer settings storage, because [[src/main/gpu-fallback.ts#getGpuPreference]] must read it synchronously before app-ready — the only point where hardware acceleration can still be disabled. Precedence is `HERMES_DISABLE_GPU` env (support escape hatch) > relaunch sentinel (user-initiated Settings restarts may still carry it) > preference > crash flag. Under "Always on" the crash guard skips persisting the flag; "Always off" suppresses the crash guard and the Office banner's re-enable button (the banner points at Settings instead). [[src/main/gpu-fallback.ts#setGpuPreference]] writes the file (IPC `set-gpu-preference`, validated in the main process); changes apply after a user-initiated relaunch via [[src/main/gpu-fallback.ts#relaunchApp]] (IPC `relaunch-app`). The Appearance pane (`src/renderer/src/components/settings/AppearancePane.tsx`) compares the saved preference against the `bootPreference` captured by [[src/main/gpu-fallback.ts#applyGpuPreferences]] so its "restart to apply" prompt survives closing and reopening Settings.
 
 ### Renderer visibility and recovery
 
@@ -43,6 +49,8 @@ Lifecycle code owns Electron windows, global app events, and shutdown cleanup.
 The packaged renderer keeps its meta CSP aligned with the production response CSP so file-backed startup assets load consistently from `file://` before the main-process header can help.
 
 Because electron-vite emits a bundled main file at `out/main/index.js`, packaged renderer loading resolves `../renderer/index.html` from `__dirname` to reach `out/renderer/index.html`.
+
+Windows packaging (`npm run build:win` / `electron-builder --win`) runs [[scripts/fix-wincodesign-cache.mjs]] first. The Go `app-builder rcedit` helper always wants legacy `winCodeSign-2.6.0`, whose macOS `.dylib` symlinks fail to extract without Developer Mode; the script seeds `%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/winCodeSign-2.6.0` so DownloadArtifact skips that extract. `toolsets.winCodeSign: "1.1.0"` in [[electron-builder.yml]] still prefers the split Windows tool zips for JS-side tool lookups.
 
 ## App Chrome Helpers
 

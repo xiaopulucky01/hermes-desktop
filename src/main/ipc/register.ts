@@ -140,6 +140,14 @@ import {
   waitForClaw3dReady,
   type Claw3dSetupProgress,
 } from "../claw3d";
+import {
+  installAgentServiceFromArchive,
+  installAgentServiceFromPath,
+  installAndStartAgentServiceFromPath,
+  listAgentServiceStatuses,
+  startAgentService,
+  stopAgentService,
+} from "../agent-services";
 import { startOfficeStack } from "../office-start";
 import {
   readEnv,
@@ -2411,6 +2419,33 @@ export function registerIpcHandlers(context: IpcContext): void {
     return true;
   });
   ipcMain.handle("claw3d-get-logs", () => getClaw3dLogs());
+
+  // A2A agent services (cloud/local install + supervisor)
+  ipcMain.handle("agent-services-list", () => listAgentServiceStatuses());
+  ipcMain.handle(
+    "agent-services-install-from-path",
+    (_event, sourcePath: string, link?: boolean) =>
+      installAgentServiceFromPath(sourcePath, { link: !!link }),
+  );
+  ipcMain.handle(
+    "agent-services-install-from-archive",
+    (_event, archiveUrl: string, expectedId?: string) =>
+      installAgentServiceFromArchive(archiveUrl, expectedId),
+  );
+  ipcMain.handle(
+    "agent-services-install-and-start",
+    (_event, sourcePath: string, link?: boolean) =>
+      installAndStartAgentServiceFromPath(sourcePath, {
+        link: !!link,
+        start: true,
+      }),
+  );
+  ipcMain.handle("agent-services-start", (_event, id: string) =>
+    startAgentService(id),
+  );
+  ipcMain.handle("agent-services-stop", (_event, id: string) =>
+    stopAgentService(id),
+  );
 
   ipcMain.handle("claw3d-start-dev", () => startDevServer());
   ipcMain.handle("claw3d-stop-dev", () => {

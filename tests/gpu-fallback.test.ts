@@ -47,6 +47,11 @@ vi.mock("electron", () => ({
       h.state.handlers[event] = cb;
     },
   },
+  powerMonitor: {
+    on: (event: string, cb: (...args: unknown[]) => void): void => {
+      h.state.handlers[`power:${event}`] = cb;
+    },
+  },
 }));
 
 const SENTINEL = "--hermes-gpu-disabled";
@@ -128,12 +133,13 @@ describe("gpu-fallback", () => {
     expect(existsSync(flagFile())).toBe(false);
     expect(h.state.hwAccelDisabled).toBe(false);
 
-    // With the stale flag gone the crash guard must re-arm, so a repeat
-    // crash re-persists a fresh flag instead of leaving the machine looping.
+    // With the stale flag gone the crash guard must re-arm, so a later
+    // crash re-persists a fresh flag for the next manual launch.
     installGpuCrashGuard();
     expect(h.state.handlers["child-process-gone"]).toBeDefined();
     fireGpuCrash();
     expect(existsSync(flagFile())).toBe(true);
+    expect(h.state.relaunchCount).toBe(0);
   });
 
   it("ignores and clears a persisted flag on macOS unless fallback is forced", async () => {
@@ -198,37 +204,68 @@ describe("gpu-fallback", () => {
     expect(h.state.switches).toContain("disable-gpu");
   });
 
-  it("the crash guard persists the flag and relaunches with the sentinel arg", async () => {
+  it("the crash guard persists the flag but does not relaunch or exit", async () => {
+    // @lat: [[lat.md/main-process#GPU Fallback#Sleep and wake]]
     const { installGpuCrashGuard } = await load();
     installGpuCrashGuard();
     fireGpuCrash();
     expect(existsSync(flagFile())).toBe(true);
-    expect(h.state.relaunchArgs).toContain(SENTINEL);
-    expect(h.state.exited).toBe(true);
+    expect(h.state.relaunchCount).toBe(0);
+    expect(h.state.exited).toBe(false);
   });
 
-  it("the crash guard still passes the sentinel when the flag write fails (no loop)", async () => {
+  it("the crash guard still stays alive when the flag write fails", async () => {
     // userData points at a regular file, so mkdir/writeFile for the flag both
-    // fail — emulating a read-only/locked filesystem. The relaunch must still
-    // carry the sentinel so the next process starts GPU-off.
+    // fail — emulating a read-only/locked filesystem. Never relaunch/exit.
     const filePath = join(testHome, "not-a-dir");
     writeFileSync(filePath, "x");
     h.state.userData = join(filePath, "nested");
     const { installGpuCrashGuard } = await load();
     installGpuCrashGuard();
     fireGpuCrash();
-    expect(h.state.relaunchArgs).toContain(SENTINEL);
-    expect(h.state.exited).toBe(true);
+    expect(h.state.relaunchCount).toBe(0);
+    expect(h.state.exited).toBe(false);
   });
 
-  it("the crash guard ignores clean GPU exits and only relaunches once", async () => {
+  it("the crash guard ignores clean GPU exits and only persists once", async () => {
     const { installGpuCrashGuard } = await load();
     installGpuCrashGuard();
     fireGpuCrash("clean-exit", 0);
+    expect(existsSync(flagFile())).toBe(false);
+    fireGpuCrash();
+    fireGpuCrash();
+    expect(existsSync(flagFile())).toBe(true);
     expect(h.state.relaunchCount).toBe(0);
+  });
+
+  it("a GPU death after resume does not relaunch the app", async () => {
+    const { installGpuCrashGuard } = await load();
+    installGpuCrashGuard();
+    h.state.handlers["power:resume"]?.();
+    fireGpuCrash();
+    expect(h.state.relaunchCount).toBe(0);
+    expect(h.state.exited).toBe(false);
+    expect(existsSync(flagFile())).toBe(false);
+  });
+
+  it("GPU deaths during suspend do not relaunch the app", async () => {
+    const { installGpuCrashGuard } = await load();
+    installGpuCrashGuard();
+    h.state.handlers["power:suspend"]?.();
+    fireGpuCrash();
+    expect(h.state.relaunchCount).toBe(0);
+    expect(h.state.exited).toBe(false);
+    expect(existsSync(flagFile())).toBe(false);
+  });
+
+  it("never auto-relaunches on a lone GPU death outside sleep/wake", async () => {
+    const { installGpuCrashGuard } = await load();
+    installGpuCrashGuard();
     fireGpuCrash();
     fireGpuCrash();
-    expect(h.state.relaunchCount).toBe(1);
+    fireGpuCrash();
+    expect(h.state.relaunchCount).toBe(0);
+    expect(h.state.exited).toBe(false);
   });
 
   it("the crash guard is a no-op when the GPU is already disabled", async () => {
@@ -316,14 +353,14 @@ describe("gpu-fallback", () => {
     expect(isGpuDisabled()).toBe(false);
   });
 
-  it("a crash under a force-on preference relaunches with the sentinel but persists no flag", async () => {
+  it("a crash under a force-on preference does not persist a flag or relaunch", async () => {
     writePref("on");
     const { installGpuCrashGuard } = await load();
     installGpuCrashGuard();
     fireGpuCrash();
     expect(existsSync(flagFile())).toBe(false);
-    expect(h.state.relaunchArgs).toContain(SENTINEL);
-    expect(h.state.exited).toBe(true);
+    expect(h.state.relaunchCount).toBe(0);
+    expect(h.state.exited).toBe(false);
   });
 
   it("setGpuPreference round-trips and a malformed file falls back to auto", async () => {

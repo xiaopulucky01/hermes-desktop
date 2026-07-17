@@ -44,6 +44,10 @@ import type {
   AgentCommandsCatalogResponse,
   AgentSlashCommand,
 } from "./slash/types";
+import {
+  dbItemsToChatMessages,
+  type DbHistoryItem,
+} from "./sessionHistory";
 
 interface QueuedMessage {
   text: string;
@@ -197,6 +201,32 @@ function Chat({
     return () => {
       cancelled = true;
     };
+  }, [initialSessionId]);
+
+  // Soft remounts restore tabs by sessionId without a seed transcript — pull
+  // history from state.db so the open chat isn't an empty shell.
+  useEffect(() => {
+    if (!initialSessionId) return;
+    if ((initialMessages?.length ?? 0) > 0) return;
+    if (messages.length > 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const items = (await window.hermesAPI.getSessionMessages(
+          initialSessionId,
+        )) as DbHistoryItem[];
+        if (cancelled || !items?.length) return;
+        const hydrated = dbItemsToChatMessages(items);
+        if (!cancelled && hydrated.length > 0) setMessages(hydrated);
+      } catch {
+        /* best-effort hydrate after sleep remount */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Only hydrate once on mount for this session seed — not on every message.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
 
   // Persist the linked folder for this session whenever it changes, once a

@@ -28,6 +28,12 @@ Workspace-linked conversations are grouped under project rows so repository chat
 
 When [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] saves a session context folder, it emits a renderer event that [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] uses to force-refresh the cache. This keeps project grouping visible immediately after a workspace is linked.
 
+## Open chat tabs
+
+Open conversation tabs must survive sleep/wake soft remounts so the user is not bounced to an empty chat.
+
+[[src/renderer/src/screens/Layout/chatShellPersistence.ts]] persists `activeProfile`, `activeRunId`, and tab metadata (runId/profile/sessionId/title) in `sessionStorage`. [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] restores that shell on mount, and [[src/renderer/src/screens/Chat/Chat.tsx#Chat]] hydrates the transcript from `getSessionMessages` when a restored tab has a `sessionId` but no seed. The dashboard transport clears the live runtime session on WebSocket close and warms reconnect on `visibilitychange`/`focus` so the next turn can `session.resume` cleanly ([[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]]).
+
 Projects and Chats are top-level collapsible sections, and each project folder can also be expanded or collapsed. [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx]] persists those disclosure states in `localStorage`; the sidebar CSS keeps section and folder rows on the same left rail, keeps disclosure arrows right-aligned, animates each disclosure with grid-row transitions, and removes hidden rows from keyboard tab order.
 
 ## Row context menu

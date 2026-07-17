@@ -114,6 +114,8 @@ Six protocol-generic client tools; routing uses endpoint URLs and Agent Card ski
 
 Orchestration flow: discover unknown URL → match skills from registry → delegate by endpoint URL → watch task log or poll status.
 
+Installed third-party A2A services (CrewAI bridge, etc.) are managed by [[lat.md/agent-services#Agent services]] — Hermes starts them, assigns ports, and upserts their Agent Cards into the same runtime registry.
+
 ### Streaming and task trace
 
 Outbound streaming uses [[resources/hermes-a2a/plugins/platforms/a2a/client.py#stream_post_json]] (SSE) and [[resources/hermes-a2a/plugins/platforms/a2a/client.py#parse_stream_event]]. Progress lines are persisted under `%LOCALAPPDATA%\\hermes\\a2a_tasks/<task_id>.jsonl`.

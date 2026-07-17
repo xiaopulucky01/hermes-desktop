@@ -884,6 +884,49 @@ interface HermesAPI {
   claw3dStartAdapter: () => Promise<boolean>;
   claw3dStopAdapter: () => Promise<boolean>;
 
+  // A2A agent services
+  listAgentServices: () => Promise<
+    Array<{
+      id: string;
+      name: string;
+      version: string;
+      enabled: boolean;
+      status: "stopped" | "starting" | "running" | "error";
+      port?: number;
+      base_url?: string;
+      card_url?: string;
+      last_error?: string | null;
+      link_path?: string;
+    }>
+  >;
+  installAgentServiceFromPath: (
+    sourcePath: string,
+    link?: boolean,
+  ) => Promise<{ success: boolean; error?: string; id?: string }>;
+  installAgentServiceFromArchive: (
+    archiveUrl: string,
+    expectedId?: string,
+  ) => Promise<{ success: boolean; error?: string; id?: string }>;
+  installAndStartAgentService: (
+    sourcePath: string,
+    link?: boolean,
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    id?: string;
+    port?: number;
+    base_url?: string;
+    card_url?: string;
+  }>;
+  startAgentService: (id: string) => Promise<{
+    success: boolean;
+    error?: string;
+    port?: number;
+    base_url?: string;
+    card_url?: string;
+  }>;
+  stopAgentService: (id: string) => Promise<{ success: boolean; error?: string }>;
+
   // Updates
   checkForUpdates: () => Promise<string | null>;
   downloadUpdate: () => Promise<boolean>;

@@ -11,6 +11,9 @@ import {
 } from "../a2a-plugin";
 import { HERMES_HOME } from "../installer";
 import {
+  bootAgentServicesOnAppStart,
+} from "../agent-services";
+import {
   isRemoteMode,
   restartGateway,
   startGatewayWithRecovery,
@@ -57,6 +60,12 @@ export function bootGatewayAndA2aOnAppStart(): void {
       console.warn(
         `[boot] Gateway did not become ready for profile "${profile}" — check gateway logs`,
       );
+    }
+
+    try {
+      await bootAgentServicesOnAppStart();
+    } catch (err) {
+      console.warn("[boot] Agent services boot failed:", err);
     }
   })();
 }

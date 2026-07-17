@@ -895,6 +895,81 @@ function normalizeUnicodeBullets(text: string): string {
     .join("\n");
 }
 
+/**
+ * True when numbered bold list items were glued mid-line / mid-CJK — the
+ * classic "1. **A** …2. **B**" or "达。2. **A2A**" / "Hermes4. **Webhook**"
+ * corruption from a mangled stream rewrite.
+ */
+export function hasGluedNumberedBoldLists(text: string): boolean {
+  for (const line of text.split("\n")) {
+    const matches = line.match(/\d+\.\s*\*\*/g);
+    if (matches && matches.length >= 2) return true;
+  }
+  if (/\p{Script=Han}\d+\.\s*\*\*/u.test(text)) return true;
+  if (/[A-Za-z]\d+\.\s*\*\*/.test(text)) return true;
+  return false;
+}
+
+/**
+ * Drop a messy glued-list draft when the same answer is rewritten cleanly
+ * later in the same bubble (stream+final stitch, or the model writing both).
+ * Keeps the later copy that starts with a proper `1. **…**` numbered list.
+ */
+export function stripDuplicatedMessyListRewrite(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed || !hasGluedNumberedBoldLists(trimmed)) return text;
+
+  let firstLine = "";
+  for (const line of trimmed.split("\n")) {
+    if (line.trim()) {
+      firstLine = line.trim();
+      break;
+    }
+  }
+  const stem = firstLine.slice(0, Math.min(48, firstLine.length));
+  if (stem.length < 20) return text;
+
+  const firstAt = trimmed.indexOf(stem);
+  if (firstAt < 0) return text;
+  const secondAt = trimmed.indexOf(stem, firstAt + stem.length);
+  if (secondAt < 0) return text;
+
+  const head = trimmed.slice(0, secondAt);
+  const tail = trimmed.slice(secondAt);
+  if (!hasGluedNumberedBoldLists(head)) return text;
+  if (!/(?:^|\n)\s*1\.\s+\*\*[^*\n]+\*\*/m.test(tail)) return text;
+  if (tail.trim().length < 80) return text;
+
+  return tail.trimStart();
+}
+
+/**
+ * Split glued numbered bold list items onto their own lines so GFM can
+ * render them. Catches stream corruption like `达。2. **A2A**`,
+ * `Hermes4. **Webhook**`, or `…：1. **Gateway** … 2. **A2A**` on one line.
+ */
+function normalizeGluedNumberedBoldLists(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      let s = line;
+      // CJK / CJK-punctuation glued to the next `N. **`
+      s = s.replace(
+        /([\p{Script=Han}。！？；：])(?=\d+\.\s*\*\*)/gu,
+        "$1\n\n",
+      );
+      // Latin letters glued to `N. **` (`Hermes4. **Webhook**`)
+      s = s.replace(/([A-Za-z])(?=\d+\.\s*\*\*)/g, "$1\n\n");
+      // Space-separated extra items still on the same physical line
+      s = s.replace(
+        /(\*\*[^*\n]+\*\*[^\n]*?)\s+(?=\d+\.\s*\*\*)/g,
+        "$1\n\n",
+      );
+      return s;
+    })
+    .join("\n");
+}
+
 /** True for ASCII workflow steps like `-> brain capture "..."` — prose, not diagrams. */
 function isWorkflowStepLine(trimmed: string): boolean {
   return /^->\s+\S/.test(trimmed);
@@ -1666,6 +1741,7 @@ export function normalizeAgentMarkdown(
 
   let s = stripStrayFenceMarkers(content);
   if (!streaming) {
+    s = stripDuplicatedMessyListRewrite(s);
     s = closeUnclosedFences(s);
   }
   s = relabelMislabeledCodeFences(s);
@@ -1677,6 +1753,7 @@ export function normalizeAgentMarkdown(
     t = repairSpacedBoldClosers(t);
     t = normalizeBoldRecommendationRows(t);
     t = normalizeUnicodeBullets(t);
+    t = normalizeGluedNumberedBoldLists(t);
     t = normalizeWorkflowArrowLines(t);
     t = normalizeEntityRelationChains(t);
     t = normalizeGluedTreeDiagrams(t);

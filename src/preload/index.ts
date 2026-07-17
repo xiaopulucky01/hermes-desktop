@@ -1189,6 +1189,57 @@ const hermesAPI = {
   claw3dStopAdapter: (): Promise<boolean> =>
     ipcRenderer.invoke("claw3d-stop-adapter"),
 
+  // A2A agent services
+  listAgentServices: (): Promise<
+    Array<{
+      id: string;
+      name: string;
+      version: string;
+      enabled: boolean;
+      status: "stopped" | "starting" | "running" | "error";
+      port?: number;
+      base_url?: string;
+      card_url?: string;
+      last_error?: string | null;
+      link_path?: string;
+    }>
+  > => ipcRenderer.invoke("agent-services-list"),
+  installAgentServiceFromPath: (
+    sourcePath: string,
+    link?: boolean,
+  ): Promise<{ success: boolean; error?: string; id?: string }> =>
+    ipcRenderer.invoke("agent-services-install-from-path", sourcePath, link),
+  installAgentServiceFromArchive: (
+    archiveUrl: string,
+    expectedId?: string,
+  ): Promise<{ success: boolean; error?: string; id?: string }> =>
+    ipcRenderer.invoke(
+      "agent-services-install-from-archive",
+      archiveUrl,
+      expectedId,
+    ),
+  installAndStartAgentService: (
+    sourcePath: string,
+    link?: boolean,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    id?: string;
+    port?: number;
+    base_url?: string;
+    card_url?: string;
+  }> =>
+    ipcRenderer.invoke("agent-services-install-and-start", sourcePath, link),
+  startAgentService: (id: string): Promise<{
+    success: boolean;
+    error?: string;
+    port?: number;
+    base_url?: string;
+    card_url?: string;
+  }> => ipcRenderer.invoke("agent-services-start", id),
+  stopAgentService: (id: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("agent-services-stop", id),
+
   // Updates
   checkForUpdates: (): Promise<string | null> =>
     ipcRenderer.invoke("check-for-updates"),

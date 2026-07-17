@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import {
   applyDashboardStreamEvent,
+  hasGluedNumberedBoldLists,
   looksGarbledMarkdown,
   mergeStreamedWithFinal,
   type DashboardEventState,
@@ -235,6 +236,34 @@ describe("mergeStreamedWithFinal", () => {
     ].join("\n");
 
     expect(mergeStreamedWithFinal(garbled, clean)).toBe(clean);
+  });
+
+  it("prefers clean final when stream glued numbered bold lists mid-line", () => {
+    const streamed = [
+      "我在 Hermes Agent / Hermes Desktop 代码库里没有找到名叫 **Agent Reach** 的功能。你可能想找的是这些近的：",
+      "",
+      "**Gateway（多平台网关）** — 让 Hermes Agent 连接 Telegram、Discord、Slack、WhatsApp、iMessage、Signal 等 20+ 消息平",
+      "台的网关。2. **A2A（Agent-to-Agent）** — Hermes Desktop 里已经接入的 A2A 协议支持，可以让 Agent 发现、调用本地 Hermes",
+      "实例（`a2a_discover` / `a2a_call` 等工具）。3. **远程连接（Remote/SSH）** — 通过 SSH 隧道连到远程 Hermes。Hermes4. **Webhook** — 外",
+      "部服务通过 webhook 触发 Hermes Agent。",
+      "",
+      "你能哪里",
+    ].join("\n");
+    const finalText = [
+      "我在 Hermes Agent / Hermes Desktop 代码库里没有找到名叫 **Agent Reach** 的功能。你可能想找的是这些相近的：",
+      "",
+      "1. **Gateway（多平台网关）** — 让 Hermes Agent 连接 Telegram、Discord、Slack、WhatsApp、iMessage、Signal 等 20+ 消息平台的网关。",
+      "2. **A2A（Agent-to-Agent）** — Hermes Desktop 里已经接入的 A2A 协议支持，可以让 Agent 发现、调用本地 Hermes 实例（`a2a_discover` / `a2a_call` 等工具）。",
+      "3. **远程连接（Remote/SSH）** — 通过 SSH 隧道连到远程 Hermes。",
+      "4. **Webhook** — 外部服务通过 webhook 触发 Hermes Agent。",
+      "",
+      '你能描述一下是在哪里看到 "Agent Reach" 这个名字的吗？这样我可以帮你更准确定位。',
+    ].join("\n");
+
+    expect(hasGluedNumberedBoldLists(streamed)).toBe(true);
+    expect(hasGluedNumberedBoldLists(finalText)).toBe(false);
+    expect(looksGarbledMarkdown(streamed)).toBe(true);
+    expect(mergeStreamedWithFinal(streamed, finalText)).toBe(finalText);
   });
 });
 

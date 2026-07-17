@@ -1,12 +1,15 @@
-import { app } from "electron";
+import { app, powerMonitor } from "electron";
 import { existsSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import type { GpuPreferenceMode, GpuStatus } from "../shared/gpu";
 
-// One-shot command-line sentinel carried across an automatic relaunch. It lets
-// the relaunched process start with GPU disabled even when the flag file could
-// not be written (read-only FS, permissions) — which is what breaks the
-// otherwise-infinite crash → relaunch cycle (PR #605 review).
+/** Swallow GPU process noise around sleep/wake; never auto-relaunch the app. */
+// @lat: [[lat.md/main-process#GPU Fallback#Sleep and wake]]
+const GPU_RESUME_GRACE_MS = 60_000;
+
+// One-shot command-line sentinel for *user-initiated* relaunch only (Settings).
+// Automatic crash recovery must not call app.relaunch — wake/focus would restart
+// the desktop. Persisting disable-gpu.flag still covers the next manual launch.
 const GPU_DISABLE_ARG = "--hermes-gpu-disabled";
 
 /** Normalised HERMES_DISABLE_GPU: "on" to force-disable, "off" to force-enable
@@ -302,10 +305,9 @@ export function reenableGpuAndRelaunch(): boolean {
 }
 
 /**
- * Watch for fatal GPU process crashes. When the GPU process dies abnormally
- * (the symptom on machines with virtual display adapters), persist the
- * disable-gpu flag and relaunch the app with software rendering instead of
- * letting Chromium retry-then-fatally-exit. Only acts once per launch.
+ * Watch for fatal GPU process crashes. Persist software-rendering for the
+ * *next* launch when a real crash streak is likely, but never auto-relaunch or
+ * exit — the desktop must stay up until the user quits (or the OS kills it).
  *
  * Register this early (before app is ready); the event itself fires later.
  */
@@ -314,37 +316,60 @@ export function installGpuCrashGuard(): void {
   // Already running with GPU disabled — nothing left to guard against.
   if (isGpuDisabled()) return;
 
-  let recovering = false;
+  let flagged = false;
+  let suspended = false;
+  let resumeGraceUntil = 0;
+
+  try {
+    powerMonitor.on("suspend", () => {
+      suspended = true;
+    });
+    powerMonitor.on("resume", () => {
+      suspended = false;
+      resumeGraceUntil = Date.now() + GPU_RESUME_GRACE_MS;
+      console.warn(
+        `[GPU] System resumed — ignoring GPU process exits for ${GPU_RESUME_GRACE_MS}ms`,
+      );
+    });
+  } catch (err) {
+    // powerMonitor is unavailable in some test stubs / early bootstrap paths.
+    console.warn("[GPU] powerMonitor unavailable; sleep/wake grace not armed:", err);
+  }
+
   app.on("child-process-gone", (_event, details) => {
     if (details.type !== "GPU") return;
-    // A clean exit isn't a crash — ignore it.
     if (details.reason === "clean-exit") return;
-    if (recovering) return;
-    recovering = true;
 
+    const now = Date.now();
+    if (suspended || now < resumeGraceUntil) {
+      console.warn(
+        `[GPU] Ignoring GPU process gone during sleep/wake ` +
+          `(reason=${details.reason}, exitCode=${details.exitCode}).`,
+      );
+      return;
+    }
+
+    // Never app.relaunch / app.exit here — sleep/wake and transient driver
+    // blips must not restart Hermes. Remember software rendering for next
+    // manual launch only (unless the user forced Always on).
+    if (getGpuPreference() === "on") {
+      console.error(
+        `[GPU] GPU process gone (reason=${details.reason}, exitCode=${details.exitCode}). ` +
+          "Hardware acceleration is Always on — not persisting disable-gpu.flag. " +
+          "Quit and reopen if rendering stays broken.",
+      );
+      return;
+    }
+
+    if (flagged) return;
+    flagged = true;
+    const persisted = persistGpuDisabled();
     console.error(
       `[GPU] GPU process gone (reason=${details.reason}, exitCode=${details.exitCode}). ` +
-        "Disabling hardware acceleration and relaunching with software rendering.",
+        (persisted
+          ? "Persisted disable-gpu.flag for the next launch. "
+          : "Could not persist disable-gpu.flag. ") +
+        "Not auto-relaunching — keep using the app; quit and reopen to apply software rendering.",
     );
-    // A "force on" preference means the user overrules persistent fallback:
-    // the sentinel still rescues this session, but no flag is written, so the
-    // next launch honors their choice and tries hardware acceleration again.
-    const forcedOn = getGpuPreference() === "on";
-    const persisted = forcedOn ? false : persistGpuDisabled();
-    if (!forcedOn && !persisted) {
-      console.error(
-        "[GPU] Could not persist disable-gpu.flag (read-only/locked filesystem?). " +
-          "Relaunching with a one-shot switch; hardware acceleration may need to be " +
-          "disabled manually via HERMES_DISABLE_GPU=1 if this recurs.",
-      );
-    }
-    // Carry the sentinel arg so the relaunched process starts GPU-off even if
-    // the flag write failed — this is what prevents an infinite crash loop.
-    const args = process.argv
-      .slice(1)
-      .filter((a) => a !== GPU_DISABLE_ARG)
-      .concat(GPU_DISABLE_ARG);
-    app.relaunch({ args });
-    app.exit(0);
   });
 }

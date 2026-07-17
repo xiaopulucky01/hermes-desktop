@@ -1,5 +1,8 @@
 import type { ChatToolEvent } from "../../../../shared/chat-stream";
 import type { ActiveTurn, ChatBubbleMessage, ChatMessage } from "./types";
+import { hasGluedNumberedBoldLists } from "./mediaUtils";
+
+export { hasGluedNumberedBoldLists };
 
 export interface DashboardStreamEvent<T = unknown> {
   payload?: T;
@@ -418,6 +421,15 @@ function documentOpener(text: string): string | null {
   return match ? normalizeText(match[0]) : null;
 }
 
+/** First CJK/prose sentence — stable anchor when the answer has no # heading. */
+function proseSentenceOpener(text: string): string | null {
+  const first = normalizeText(text.trim().split("\n")[0] ?? "");
+  if (first.length < 24) return null;
+  const sentence = first.match(/^[\s\S]{24,120}?[。！？]/);
+  if (sentence) return sentence[0];
+  return first.slice(0, 80);
+}
+
 /** True when streamed assistant text shows common LLM formatting corruption. */
 // @lat: [[chat-commands#Completion text reconciliation]]
 export function looksGarbledMarkdown(text: string): boolean {
@@ -438,6 +450,13 @@ export function looksGarbledMarkdown(text: string): boolean {
     if (re.test(trimmed)) score++;
   }
   if (/\|\s*\|\s*\*\*/.test(trimmed)) score++;
+  // Glued numbered bold lists alone are enough — the clean final rewrite
+  // shares the topic but not the corruption; stacking both is what users
+  // see as "messy then correct" in one bubble.
+  if (hasGluedNumberedBoldLists(trimmed)) score += 2;
+  // Dangling / odd bold markers left by mid-stream truncation.
+  const boldMarks = (trimmed.match(/\*\*/g) || []).length;
+  if (boldMarks >= 3 && boldMarks % 2 === 1) score++;
   const opens = (trimmed.match(/[\[{]/g) || []).length;
   const closes = (trimmed.match(/[\]}]/g) || []).length;
   if (opens >= 4 && closes >= 4 && Math.abs(opens - closes) >= 3) score++;
@@ -589,6 +608,35 @@ export function mergeStreamedWithFinal(
     streamedOpener &&
     streamedOpener === finalOpener &&
     finalContent.length >= streamedContent.length * 0.6
+  ) {
+    return finalContent;
+  }
+
+  // Same CJK/prose opening sentence, but the stream glued numbered bold list
+  // items mid-line ("达。2. **A2A**" / "Hermes4. **Webhook**") while the final
+  // rewrite is a clean list. Prefer final so the bubble does not stack a
+  // messy copy above the readable one.
+  const streamedProse = proseSentenceOpener(streamedContent);
+  const finalProse = proseSentenceOpener(finalContent);
+  if (
+    streamedProse &&
+    finalProse &&
+    (streamedProse === finalProse ||
+      streamedProse.startsWith(finalProse.slice(0, 24)) ||
+      finalProse.startsWith(streamedProse.slice(0, 24))) &&
+    hasGluedNumberedBoldLists(streamedContent) &&
+    !hasGluedNumberedBoldLists(finalContent) &&
+    finalContent.length >= streamedContent.length * 0.5
+  ) {
+    return finalContent;
+  }
+  if (
+    streamedGarbled &&
+    streamedProse &&
+    finalProse &&
+    (streamedProse === finalProse ||
+      sharedPrefix >= 24) &&
+    finalContent.length >= streamedContent.length * 0.5
   ) {
     return finalContent;
   }
