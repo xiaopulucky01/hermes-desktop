@@ -790,6 +790,35 @@ describe("normalizeAgentMarkdown", () => {
     expect(out.split("\n").some((line) => line.trim() === "|")).toBe(false);
   });
 
+  it("recovers a glued status table buried after a broken backtick prefix", () => {
+    const raw = [
+      "二、UI 已覆盖的核心能力",
+      "",
+      "`代码块折叠等。 | Web Preview | ✅ || 应用内分屏预览网页 || Sessions 管理 | ✅ || 查看、搜索、删除历史会话 || Context Folder | ✅ || 会话级工作目录 |",
+      "",
+      "三、后续",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toContain("||");
+    expect(out).not.toContain("`代码块折叠");
+    expect(out).toContain("| 功能 | 状态 | 说明 |");
+    expect(out).toContain("| --- | --- | --- |");
+    expect(out).toContain("| Web Preview | ✅ | 应用内分屏预览网页 |");
+    expect(out).toContain("| Sessions 管理 | ✅ | 查看、搜索、删除历史会话 |");
+    expect(out).toContain("| Context Folder | ✅ | 会话级工作目录 |");
+    expect(out).toContain("三、后续");
+  });
+
+  it("merges emoji-status fragments split from double-pipe glue", () => {
+    const raw =
+      "| Web Preview | ✅ || 应用内分屏预览网页 || Sessions 管理 | ✅ || 查看、搜索、删除历史会话 |";
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| Web Preview | ✅ | 应用内分屏预览网页 |");
+    expect(out).toContain("| Sessions 管理 | ✅ | 查看、搜索、删除历史会话 |");
+    expect(out).not.toContain("||");
+    expect(out.split("\n").filter((l) => /^\| Web Preview \|/.test(l.trim())).length).toBe(1);
+  });
+
   // @lat: [[code-blocks#Bare layer diagrams wrap in text fences]]
   it("wraps a bare MCP/A2A layer diagram in a text fence", () => {
     const raw = [
@@ -1065,5 +1094,70 @@ describe("normalizeAgentMarkdown", () => {
       "- **如果没有明确答案** -> 先做 **开发者工具**（风险最低、优势最大）",
     );
     expect(out).not.toMatch(/^\*\* -> /m);
+  });
+
+  it("repairs mashed fences and drops a duplicated near-rewrite", () => {
+    const clean = [
+      "✅ **Dashboard 已经启动**",
+      "",
+      "地址：http://127.0.0.1:9119",
+      "",
+      "要修复 TUI 组件吗？运行：",
+      "",
+      "```bash",
+      "git restore -- ui-tui",
+      "npm install --silent --no-fund --no-audit --progress=false",
+      "```",
+      "",
+      "或者一次性强制：",
+      "",
+      "```bash",
+      "hermes update --force",
+      "```",
+    ].join("\n");
+    const mashed = [
+      "✅ **Dashboard 已经启动**",
+      "",
+      "地址：http://127.0.0.1:9119",
+      "",
+      "要修复 TUI 组件吗？运行：",
+      "",
+      "bash git restore -- ui-tui npm install --silent --no-fund --no-audit --progress=false",
+      "",
+      "或者一次性强制 ```bash hermes update --force",
+      "",
+      "```text",
+      "```",
+    ].join("\n");
+
+    const stacked = `${clean}\n\n耍我？\n\n${mashed}`;
+    const out = normalizeAgentMarkdown(stacked);
+    expect((out.match(/Dashboard 已经启动/g) || []).length).toBe(1);
+    expect(out).not.toMatch(/强制 ```bash/);
+    expect(out).not.toMatch(/^bash git restore/m);
+    expect(out).not.toMatch(/```text\s*\n```/);
+    expect(out).not.toContain("耍我？");
+    expect(out).toContain("```bash");
+    expect(out).toContain("git restore -- ui-tui");
+    expect(out).toContain("hermes update --force");
+  });
+
+  it("rebuilds proper bash fences from mashed inline markers", () => {
+    const raw = [
+      "要修复 TUI 组件吗？运行：",
+      "",
+      "bash git restore -- ui-tui npm install --silent",
+      "",
+      "或者一次性强制 ```bash hermes update --force",
+      "",
+      "```text",
+      "```",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).not.toMatch(/强制 ```bash/);
+    expect(out).not.toMatch(/^bash git restore/m);
+    expect(out).not.toMatch(/```text\s*\n```/);
+    expect(out).toMatch(/```bash\ngit restore -- ui-tui\nnpm install --silent\n```/);
+    expect(out).toMatch(/```bash\nhermes update --force\n```/);
   });
 });

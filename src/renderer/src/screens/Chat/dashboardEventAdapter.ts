@@ -1,6 +1,9 @@
 import type { ChatToolEvent } from "../../../../shared/chat-stream";
 import type { ActiveTurn, ChatBubbleMessage, ChatMessage } from "./types";
-import { hasGluedNumberedBoldLists } from "./mediaUtils";
+import {
+  hasGluedNumberedBoldLists,
+  hasMashedCodeFences,
+} from "./mediaUtils";
 
 export { hasGluedNumberedBoldLists };
 
@@ -417,7 +420,9 @@ function headingsMatch(a: string | null, b: string | null): boolean {
 
 /** First bold sentence / opener — stable anchor for spotting document rewrites. */
 function documentOpener(text: string): string | null {
-  const match = text.match(/^\*\*[^*]+\*\*[^*\n]*/);
+  // Allow a short emoji / status glyph before the bold lead-in
+  // (e.g. "✅ **Dashboard 已经启动**").
+  const match = text.match(/^(?:[^\n*]{0,6}\s*)?\*\*[^*]+\*\*[^*\n]*/);
   return match ? normalizeText(match[0]) : null;
 }
 
@@ -454,6 +459,9 @@ export function looksGarbledMarkdown(text: string): boolean {
   // shares the topic but not the corruption; stacking both is what users
   // see as "messy then correct" in one bubble.
   if (hasGluedNumberedBoldLists(trimmed)) score += 2;
+  // Fence markers glued into prose / language tags left as bare lines —
+  // the clean rewrite keeps real ``` fences while the mashed copy does not.
+  if (hasMashedCodeFences(trimmed)) score += 2;
   // Dangling / odd bold markers left by mid-stream truncation.
   const boldMarks = (trimmed.match(/\*\*/g) || []).length;
   if (boldMarks >= 3 && boldMarks % 2 === 1) score++;
@@ -515,6 +523,8 @@ function tailHeadOverlap(a: string, b: string): number {
  *                        bubble starts empty and final is all we have)
  *   - final ⊇ streamed → final
  *   - streamed ⊇ final → streamed (keeps the pre-tool-call text)
+ *   - streamed garbled, final clean → final
+ *   - streamed clean, final garbled → streamed (mashed fence rewrite)
  *   - tail/head overlap → stitch, dropping the duplicated seam
  *   - shared long prefix → final (model re-sent a revised full answer)
  *   - same top heading + shared body prefix → final (garbled stream rewrite)
@@ -546,6 +556,16 @@ export function mergeStreamedWithFinal(
     finalContent.length >= streamedContent.length * 0.4
   ) {
     return finalContent;
+  }
+  // Streamed deltas were the clean copy; final_response re-sent a mashed
+  // rewrite of the same answer (lost newlines on fences). Prefer streamed
+  // instead of stacking both or adopting the garbled final.
+  if (
+    !streamedGarbled &&
+    finalGarbled &&
+    streamedContent.length >= finalContent.length * 0.4
+  ) {
+    return streamedContent;
   }
 
   const overlap = tailHeadOverlap(streamedContent, finalContent);

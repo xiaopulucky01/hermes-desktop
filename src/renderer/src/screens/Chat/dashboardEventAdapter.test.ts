@@ -265,6 +265,50 @@ describe("mergeStreamedWithFinal", () => {
     expect(looksGarbledMarkdown(streamed)).toBe(true);
     expect(mergeStreamedWithFinal(streamed, finalText)).toBe(finalText);
   });
+
+  it("prefers clean copy when the other side has mashed code fences", () => {
+    const clean = [
+      "✅ **Dashboard 已经启动**",
+      "",
+      "地址：http://127.0.0.1:9119",
+      "",
+      "要修复 TUI 组件吗？运行：",
+      "",
+      "```bash",
+      "git restore -- ui-tui",
+      "npm install --silent --no-fund --no-audit --progress=false",
+      "```",
+      "",
+      "或者一次性强制：",
+      "",
+      "```bash",
+      "hermes update --force",
+      "```",
+      "",
+      "(`ui-tui` 目录被删了，需要恢复后才能使用嵌入式聊天窗口)",
+    ].join("\n");
+    const mashed = [
+      "✅ **Dashboard 已经启动**",
+      "",
+      "地址：http://127.0.0.1:9119",
+      "",
+      "要修复 TUI 组件吗？运行：",
+      "",
+      "bash git restore -- ui-tui npm install --silent --no-fund --no-audit --progress=false",
+      "",
+      "或者一次性强制 ```bash hermes update --force",
+      "",
+      "(`ui-tui` 目录被删了，需要恢复后才能使用嵌入式聊天窗口)",
+      "",
+      "```text",
+      "```",
+    ].join("\n");
+
+    expect(looksGarbledMarkdown(mashed)).toBe(true);
+    expect(looksGarbledMarkdown(clean)).toBe(false);
+    expect(mergeStreamedWithFinal(clean, mashed)).toBe(clean);
+    expect(mergeStreamedWithFinal(mashed, clean)).toBe(clean);
+  });
 });
 
 describe("applyDashboardStreamEvent — message.complete text reconciliation", () => {

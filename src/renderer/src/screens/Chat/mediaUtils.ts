@@ -374,6 +374,141 @@ function prepareGluedTableLine(line: string): string {
   return `${leading}${trimmed}`;
 }
 
+/**
+ * Recover a glued `||` table buried after a broken backtick / orphaned cell
+ * fragment (e.g. `` `代码块折叠等。 | Web Preview | ✅ || … ``).
+ */
+function salvagePrefixedGluedTableLine(line: string): string {
+  let trimmed = line.trim();
+  if (!trimmed) return line;
+
+  // Broken inline/fence remnant: a leading backtick with no closer on the line.
+  if (trimmed.startsWith("`") && !trimmed.slice(1).includes("`")) {
+    trimmed = trimmed.slice(1).trim();
+  } else if (/^`[^`|]*\|/.test(trimmed)) {
+    trimmed = trimmed.replace(/^`+/, "").trim();
+  }
+
+  if (trimmed.startsWith("|")) {
+    return prepareGluedTableLine(
+      `${line.match(/^\s*/)?.[0] ?? ""}${trimmed}`,
+    );
+  }
+
+  // Need clear row-glue evidence so prose like "A | B | C" is left alone.
+  if ((trimmed.match(/\|\|/g) || []).length < 2) return line;
+
+  const start = trimmed.search(
+    /\|[ \t]*[^|\n]+[ \t]*\|[ \t]*[^|\n]+[ \t]*\|/,
+  );
+  if (start < 0) return line;
+
+  const prefix = trimmed.slice(0, start).trim().replace(/\|$/, "").trim();
+  const table = prepareGluedTableLine(trimmed.slice(start).trim());
+  if (!table.trim().startsWith("|")) return line;
+
+  // Orphaned end of a previous cell ("…折叠等。") — drop it; the rest is the table.
+  if (prefix && /[。！？.!?]$/.test(prefix)) return table;
+  if (prefix) return `${prefix}\n\n${table}`;
+  return table;
+}
+
+/** True when a cell is a status glyph / short status label. */
+function isStatusTableCell(cell: string): boolean {
+  const t = cell.trim();
+  if (!t) return false;
+  if (/^(?:✅|❌|⚠️|✔|✖|☑|☒|🟢|🔴|🟡)/u.test(t)) return true;
+  if (/^(?:✅|❌|⚠️)\s*\S/u.test(t) && t.length <= 12) return true;
+  return false;
+}
+
+/**
+ * After `||` splits `| name | ✅ || desc ||` into a 2-cell row plus a 1-cell
+ * row, reassemble them into one 3-column `| name | ✅ | desc |` row.
+ */
+function mergeEmojiStatusTableFragments(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const cells = parseTableCells(trimmed);
+    const nextTrimmed = lines[i + 1]?.trim() ?? "";
+    const nextCells = parseTableCells(nextTrimmed);
+
+    if (
+      cells.length === 2 &&
+      nextCells.length === 1 &&
+      isStatusTableCell(cells[1]) &&
+      !TABLE_SEPARATOR_RE.test(trimmed) &&
+      !TABLE_SEPARATOR_RE.test(nextTrimmed) &&
+      !looksLikeTableHeader(trimmed)
+    ) {
+      out.push(formatTableRow([cells[0], cells[1], nextCells[0]]));
+      i++;
+      continue;
+    }
+    out.push(lines[i]);
+  }
+
+  return ensureStatusDescriptionTableHeader(out.join("\n"));
+}
+
+/**
+ * Prefixed glued status tables often lose their header; without a separator
+ * remark-gfm will not render the recovered 3-column rows as a table.
+ */
+function ensureStatusDescriptionTableHeader(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const cells = parseTableCells(trimmed);
+    const isStatusRow =
+      cells.length === 3 &&
+      isStatusTableCell(cells[1]) &&
+      !TABLE_SEPARATOR_RE.test(trimmed) &&
+      !looksLikeTableHeader(trimmed);
+
+    if (!isStatusRow) {
+      out.push(lines[i]);
+      continue;
+    }
+
+    let runEnd = i;
+    while (runEnd + 1 < lines.length) {
+      const nextCells = parseTableCells(lines[runEnd + 1].trim());
+      if (
+        nextCells.length !== 3 ||
+        !isStatusTableCell(nextCells[1]) ||
+        looksLikeTableHeader(lines[runEnd + 1].trim())
+      ) {
+        break;
+      }
+      runEnd++;
+    }
+
+    if (runEnd >= i) {
+      const prev = previousNonBlankLine(out, out.length - 1);
+      const prevIsSep = prev ? TABLE_SEPARATOR_RE.test(prev) : false;
+      const prevIsHeader = prev ? looksLikeTableHeader(prev) : false;
+      const needHeader = !prevIsSep && !prevIsHeader;
+      if (needHeader && runEnd > i) {
+        out.push("| 功能 | 状态 | 说明 |");
+        out.push("| --- | --- | --- |");
+      } else if (!prevIsSep && prevIsHeader) {
+        out.push("| --- | --- | --- |");
+      }
+    }
+
+    for (let j = i; j <= runEnd; j++) out.push(lines[j]);
+    i = runEnd;
+  }
+
+  return out.join("\n");
+}
+
 /** Remove orphan `|` rows left after glued-table splitting. */
 function stripOrphanTableRows(text: string): string {
   return text
@@ -494,10 +629,19 @@ function expandInlineDashSeparators(text: string): string {
 
 /** Pre-split repairs for one-line tables: leading `||`, glued separators. */
 function normalizeSingleLineTableBlock(line: string): string {
-  let s = prepareGluedTableLine(line);
-  if (!s.trim().startsWith("|")) return expandInlineDashSeparators(line);
-  s = expandGluedDashSeparators(s);
-  return s;
+  const salvaged = salvagePrefixedGluedTableLine(line);
+  // salvage may introduce a prose + blank + table block
+  if (salvaged.includes("\n")) {
+    return salvaged
+      .split("\n")
+      .map((part) => {
+        if (!part.trim().startsWith("|")) return part;
+        return expandGluedDashSeparators(prepareGluedTableLine(part));
+      })
+      .join("\n");
+  }
+  if (!salvaged.trim().startsWith("|")) return expandInlineDashSeparators(line);
+  return expandGluedDashSeparators(salvaged);
 }
 
 /** Split one glued table line using `| |` boundaries and the active column count. */
@@ -911,6 +1055,33 @@ export function hasGluedNumberedBoldLists(text: string): boolean {
 }
 
 /**
+ * True when fence markers are mashed into prose — a common stream corruption
+ * where newlines around ```lang are dropped, leaving `强制 ```bash cmd` or a
+ * bare `bash git …` language tag as a prose line.
+ */
+export function hasMashedCodeFences(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  // Fence opener glued after prose on the same line (spaces/tabs only — not
+  // newlines, or a normal `prose\n\n```bash\ncode` block looks mashed).
+  if (/[^\n`][ \t]*```\w+[ \t]+\S/.test(trimmed)) return true;
+  // Opening fence with the first code token still on the fence line.
+  if (/^```\w+[ \t]+\S/m.test(trimmed)) return true;
+  // Language tag left as a bare prose line after the opening ``` was lost.
+  if (
+    /^(?:bash|sh|zsh|shell|powershell|cmd)[ \t]+(?:git|npm|npx|pnpm|yarn|hermes|cd|curl|pip|python|node)\b/m.test(
+      trimmed,
+    )
+  ) {
+    return true;
+  }
+  // Empty generic fence left behind by a truncated rewrite.
+  if (/^```(?:text|txt|plain)?[ \t]*\n```/m.test(trimmed)) return true;
+  return false;
+}
+
+/**
  * Drop a messy glued-list draft when the same answer is rewritten cleanly
  * later in the same bubble (stream+final stitch, or the model writing both).
  * Keeps the later copy that starts with a proper `1. **…**` numbered list.
@@ -941,6 +1112,138 @@ export function stripDuplicatedMessyListRewrite(text: string): string {
   if (tail.trim().length < 80) return text;
 
   return tail.trimStart();
+}
+
+/** Count well-formed fenced blocks vs mashed / empty fence markers. */
+function fenceQualityScore(text: string): number {
+  const proper = (text.match(/^```\w*\s*$/gm) || []).length;
+  let score = Math.floor(proper / 2) * 3;
+  if (hasMashedCodeFences(text)) score -= 4;
+  if (hasGluedNumberedBoldLists(text)) score -= 3;
+  // Prefer the longer readable copy when fence quality ties.
+  score += Math.min(2, Math.floor(text.trim().length / 400));
+  return score;
+}
+
+/**
+ * Drop a near-duplicate rewrite of the same answer when both copies share the
+ * same opening stem in one bubble (stream+final concat, or the model repeating
+ * itself). Keeps the higher-quality copy — proper fences win over mashed ones.
+ */
+export function stripDuplicatedNearRewrite(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return text;
+
+  let firstLine = "";
+  for (const line of trimmed.split("\n")) {
+    if (line.trim()) {
+      firstLine = line.trim();
+      break;
+    }
+  }
+  const stem = firstLine.slice(0, Math.min(40, firstLine.length));
+  if (stem.length < 16) return text;
+
+  const firstAt = trimmed.indexOf(stem);
+  if (firstAt < 0) return text;
+  const secondAt = trimmed.indexOf(stem, firstAt + stem.length);
+  if (secondAt < 0) return text;
+
+  // Require a real gap between copies so short repeated phrases inside one
+  // answer (e.g. a heading restated) are left alone.
+  if (secondAt - firstAt < 80) return text;
+
+  const head = trimmed.slice(0, secondAt).trimEnd();
+  const tail = trimmed.slice(secondAt).trimStart();
+  if (head.length < 80 || tail.length < 80) return text;
+
+  const headScore = fenceQualityScore(head);
+  const tailScore = fenceQualityScore(tail);
+  // Only strip when fence/list quality clearly differs, or when one half is
+  // mashed and the other is not — avoids dropping intentional multi-part
+  // answers that happen to share a short opener.
+  const headMashed = hasMashedCodeFences(head);
+  const tailMashed = hasMashedCodeFences(tail);
+  const headGlued = hasGluedNumberedBoldLists(head);
+  const tailGlued = hasGluedNumberedBoldLists(tail);
+  if (
+    !headMashed &&
+    !tailMashed &&
+    !headGlued &&
+    !tailGlued &&
+    Math.abs(headScore - tailScore) < 2
+  ) {
+    return text;
+  }
+
+  const chosen = (tailScore > headScore ? tail : head).trimStart();
+  // Drop a short aside that sat between the two copies (e.g. a glued-in
+  // interjection left by a bad stream+final concat).
+  if (chosen === head.trimStart()) {
+    const parts = chosen.split(/\n\n+/);
+    if (parts.length >= 2) {
+      const last = parts[parts.length - 1].trim();
+      if (
+        last.length > 0 &&
+        last.length < 24 &&
+        !last.includes(stem.slice(0, Math.min(12, stem.length)))
+      ) {
+        return parts.slice(0, -1).join("\n\n").trimEnd();
+      }
+    }
+  }
+  return chosen;
+}
+
+/**
+ * Split fence markers that were glued into prose onto their own lines, and
+ * restore a bash fence when the opening ``` was lost but the language tag
+ * remained (`bash git restore …`).
+ */
+/**
+ * Split fence markers that were glued into prose onto their own lines, and
+ * restore a bash fence when the opening ``` was lost but the language tag
+ * remained (`bash git restore …`).
+ */
+function repairMashedInlineFences(text: string): string {
+  let s = text;
+  // "强制 ```bash hermes update --force" → prose + proper fence.
+  // Body must be greedy: a lazy `[^\n`]+?` stops after one char because the
+  // trailing closer is optional and can match empty.
+  s = s.replace(
+    /([^\n`])[ \t]*```(\w+)[ \t]+([^\n`]+)(?:[ \t]*```)?/g,
+    (_m, before: string, lang: string, body: string) => {
+      const code = body.trim();
+      if (!code) return `${before}`;
+      return `${before}\n\n\`\`\`${lang}\n${code}\n\`\`\``;
+    },
+  );
+  // Bare language-tag lines left after the opening fence disappeared.
+  s = s
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      const match =
+        /^(bash|sh|zsh|shell|powershell|cmd)[ \t]+((?:git|npm|npx|pnpm|yarn|hermes|cd|curl|pip|python|node)\b.*)$/i.exec(
+          trimmed,
+        );
+      if (!match) return line;
+      // Split glued sibling commands onto separate lines inside the fence.
+      const body = match[2]
+        .replace(
+          /[ \t]+(?=(?:git|npm|npx|pnpm|yarn|hermes|cd|curl|pip|python|node)[ \t])/gi,
+          "\n",
+        )
+        .trim();
+      return `\`\`\`${match[1].toLowerCase()}\n${body}\n\`\`\``;
+    })
+    .join("\n");
+  return s;
+}
+
+/** Remove empty fenced blocks left by truncated rewrites (` ```text\\n``` `). */
+function stripEmptyFences(text: string): string {
+  return text.replace(/^```\w*[ \t]*\n```[ \t]*\n?/gm, "");
 }
 
 /**
@@ -1472,6 +1775,7 @@ const LAYER_MARKER_RE = new RegExp(
 
 function looksLikeGluedTableLine(trimmed: string): boolean {
   if (isTableLine(trimmed)) return true;
+  if ((trimmed.match(/\|\|/g) || []).length >= 2) return true;
   return (
     /[^|]+\|[^|]+\|/.test(trimmed) &&
     /\|\s*[-:][-:|\s]+\|/.test(trimmed)
@@ -1741,8 +2045,11 @@ export function normalizeAgentMarkdown(
 
   let s = stripStrayFenceMarkers(content);
   if (!streaming) {
+    s = repairMashedInlineFences(s);
+    s = stripDuplicatedNearRewrite(s);
     s = stripDuplicatedMessyListRewrite(s);
     s = closeUnclosedFences(s);
+    s = stripEmptyFences(s);
   }
   s = relabelMislabeledCodeFences(s);
   s = unwrapMislabeledFences(s);
@@ -1815,6 +2122,7 @@ export function normalizeAgentMarkdown(
     t = insertMissingTableSeparators(t);
     t = fixMergedTableHeaders(t);
     t = stripOrphanTableRows(splitGluedTableLines(t));
+    t = mergeEmojiStatusTableFragments(t);
     t = fixMergedTableHeaders(t);
     t = fixMalformedSeparatorRows(t);
     t = normalizeTableRowPipes(t);
