@@ -158,6 +158,8 @@ export default function ProfileWalletPane({
         setCloudNote(t("agents.walletSignInHint"));
       } else if (result.status === "unlinked") {
         setCloudNote(t("agents.walletSyncedHint"));
+      } else if (result.status === "foreign") {
+        setCloudNote(t("agents.walletForeignHint"));
       } else if (result.status === "error") {
         setCloudNote(result.error || t("agents.walletLoadFailed"));
       } else if (result.wallets.length > 0) {

@@ -10,6 +10,9 @@ export default {
   send: "Send",
   searchModels: "Search models...",
   custom: "Custom",
+  allModels: "All models",
+  noModelsMatch: "No models match",
+  configure: "Configure",
   typeModelName: "Type model name...",
   reasoningEffort: {
     title: "Reasoning Level",
@@ -28,6 +31,8 @@ export default {
     highDescription: "Deeper reasoning for complex work.",
     xhigh: "Max",
     xhighDescription: "Maximum reasoning depth when supported.",
+    faster: "Faster",
+    smarter: "Smarter",
   },
   emptyTitle: "How can I help you today?",
   emptyHint: "Ask me to write code, answer questions, search the web, and more",

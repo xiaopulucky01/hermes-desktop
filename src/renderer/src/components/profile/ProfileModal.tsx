@@ -5,6 +5,7 @@ import {
   Plug,
   Pencil,
   Puzzle,
+  Refresh,
   Settings,
   Signal,
   Sparkles,
@@ -22,6 +23,8 @@ import { MemoryEntries } from "../../screens/Memory/MemoryEntries";
 import type { MemoryData } from "../../screens/Memory/types";
 import { AppModal, AppModalTitle } from "../modal/AppModal";
 import ProfileWalletPane from "./ProfileWalletPane";
+import ProfileSyncPane from "./ProfileSyncPane";
+import type { ProfileSection } from "./ProfileModalContext";
 
 /** Mirrors the entry shape returned by `window.hermesAPI.listProfiles()`. */
 interface ProfileInfo {
@@ -50,14 +53,10 @@ export interface ProfileModalProps {
   onChanged?: () => void;
   /** Fired after the profile is deleted, before the modal closes. */
   onDeleted?: (name: string) => void;
+  /** Section to show when the modal opens; defaults to "profile". */
+  initialSection?: ProfileSection;
 }
 
-type ProfileSection =
-  | "profile"
-  | "persona"
-  | "agentMemory"
-  | "wallet"
-  | "advanced";
 type ProfileChipIcon = React.ComponentType<{
   size?: number;
   className?: string;
@@ -74,6 +73,7 @@ const PROFILE_SECTIONS: ReadonlyArray<{
   { id: "persona", labelKey: "agents.sectionPersona", Icon: Sparkles },
   { id: "agentMemory", labelKey: "agents.sectionAgentMemory", Icon: Database },
   { id: "wallet", labelKey: "agents.sectionWallet", Icon: Wallet },
+  { id: "sync", labelKey: "agents.sectionSync", Icon: Refresh },
   { id: "advanced", labelKey: "agents.sectionAdvanced", Icon: Settings },
 ];
 
@@ -91,11 +91,19 @@ export default function ProfileModal({
   onExited,
   onChanged,
   onDeleted,
+  initialSection,
 }: ProfileModalProps): React.JSX.Element {
   const id = name;
   const { t } = useI18n();
   const [profile, setProfile] = useState<ProfileInfo | null>(null);
-  const [section, setSection] = useState<ProfileSection>("profile");
+  const [section, setSection] = useState<ProfileSection>(
+    initialSection ?? "profile",
+  );
+  // Re-apply on every open so a reused modal instance honours the opener's
+  // requested section (e.g. the bank ATM deep-links to "wallet").
+  useEffect(() => {
+    if (open) setSection(initialSection ?? "profile");
+  }, [open, initialSection]);
   const [error, setError] = useState("");
   const [memoryData, setMemoryData] = useState<MemoryData | null>(null);
   const [memoryLoading, setMemoryLoading] = useState(false);
@@ -306,8 +314,8 @@ export default function ProfileModal({
       overlayClassName="profile-modal-overlay"
       labelledBy="profile-modal-title"
     >
-      <div className="profile-modal-header">
-        <div className="profile-modal-header-main">
+      <aside className="profile-modal-sidebar">
+        <div className="profile-modal-sidebar-head">
           {profile && (
             <ProfileAvatar
               name={profile.id}
@@ -323,18 +331,7 @@ export default function ProfileModal({
             {agentName}
           </AppModalTitle>
         </div>
-        <button
-          type="button"
-          className="profile-modal-close"
-          onClick={onClose}
-          aria-label={t("common.cancel")}
-        >
-          <X size={18} />
-        </button>
-      </div>
-
-      {profile ? (
-        <div className="profile-modal-layout">
+        {profile && (
           <nav className="profile-modal-nav" aria-label={t("agents.title")}>
             {PROFILE_SECTIONS.map((s) => (
               <button
@@ -350,7 +347,22 @@ export default function ProfileModal({
               </button>
             ))}
           </nav>
+        )}
+      </aside>
 
+      <div className="profile-modal-main">
+        <div className="profile-modal-topbar">
+          <button
+            type="button"
+            className="profile-modal-close"
+            onClick={onClose}
+            aria-label={t("common.cancel")}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {profile ? (
           <div className="profile-modal-content">
             {section === "profile" && (
               <div className="profile-modal-pane">
@@ -507,6 +519,8 @@ export default function ProfileModal({
 
             {section === "wallet" && <ProfileWalletPane profile={profile.id} />}
 
+            {section === "sync" && <ProfileSyncPane profile={profile.id} />}
+
             {section === "advanced" && (
               <div className="profile-modal-pane">
                 {profile.isDefault ? (
@@ -555,17 +569,17 @@ export default function ProfileModal({
               </div>
             )}
           </div>
-        </div>
-      ) : (
-        <div className="profile-modal-loading">
-          <div className="loading-spinner" />
-        </div>
-      )}
+        ) : (
+          <div className="profile-modal-loading">
+            <div className="loading-spinner" />
+          </div>
+        )}
 
-      <div className="profile-modal-footer">
-        <button className="btn btn-primary btn-sm" onClick={onClose}>
-          {t("common.done")}
-        </button>
+        <div className="profile-modal-footer">
+          <button className="btn btn-primary btn-sm" onClick={onClose}>
+            {t("common.done")}
+          </button>
+        </div>
       </div>
 
       <input

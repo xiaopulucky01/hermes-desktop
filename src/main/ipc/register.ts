@@ -5,6 +5,7 @@ import {
   ipcMain,
   Menu,
   Notification,
+  nativeTheme,
   dialog,
   clipboard,
 } from "electron";
@@ -79,6 +80,7 @@ import {
 } from "../hermes-agent-compat";
 import {
   addMcpServer,
+  updateMcpServer,
   installMcpCatalogEntry,
   listMcpCatalog,
   listMcpServers,
@@ -93,8 +95,16 @@ import {
   detectDeviceCode,
 } from "../hermes-auth";
 import { startDeviceLogin, cancelDeviceLogin } from "../hermes-account";
-import { syncAgents, getAgentSyncStatus } from "../agent-sync";
-import { getAccount, clearAccount } from "../account-store";
+import {
+  syncAgents,
+  getAgentSyncStatus,
+  getLinkedAgentId,
+} from "../agent-sync";
+import {
+  getAccount,
+  clearAllAccounts,
+  findAccountProfile,
+} from "../account-store";
 import {
   isRemoteMode,
   isRemoteOnlyMode,
@@ -111,10 +121,18 @@ import {
   resolvePendingClarify,
 } from "../hermes";
 import {
+  freshDashboardWebSocketUrl,
   getDashboardStatus,
   startDashboard,
   stopDashboard,
 } from "../dashboard";
+import {
+  clearRemoteOAuthSession,
+  connectionConfigAfterRemoteOAuthLogin,
+  openRemoteOAuthLogin,
+  probeRemoteAuthMode,
+  remoteOAuthSessionState,
+} from "../remote-oauth";
 import {
   startSshTunnel,
   ensureSshTunnel,
@@ -235,6 +253,10 @@ import {
   addModel,
   removeModel,
   updateModel,
+  listModelDefinitions,
+  getModelDefinition,
+  setModelDefinition,
+  removeModelDefinition,
   type SavedModel,
 } from "../models";
 import { validateChatReadiness } from "../validation";
@@ -263,7 +285,13 @@ import {
   listWallets,
   renameWallet,
 } from "../wallet-store";
+import {
+  listCustomProviders,
+  removeCustomProvider,
+  upsertCustomProvider,
+} from "../providers-store";
 import { syncWalletsForProfile } from "../wallet-sync";
+import { getWalletPortfolio, provisionAgentWallet } from "../wallet-actions";
 import { getTokenBalances } from "../wallet-balances";
 import type { ImportWalletInput } from "../../shared/wallets";
 import {
@@ -398,6 +426,7 @@ export interface IpcContext {
   getMainWindow: () => BrowserWindow | null;
   notifyConnectionConfigChanged: () => void;
   notifyModelLibraryChanged: () => void;
+  notifyCustomProvidersChanged: () => void;
   openExternalUrl: (rawUrl: unknown) => void;
 }
 
@@ -559,6 +588,14 @@ async function withRemoteDashboard<T>(
   dashboardOperation: () => Promise<T>,
   legacyOperation: () => Promise<T> | T,
 ): Promise<T> {
+  if (conn.remoteAuthMode === "oauth") {
+    if (conn.remoteChatTransport === "legacy") {
+      throw new Error(
+        "Legacy remote transport cannot authenticate to an OAuth gateway.",
+      );
+    }
+    return dashboardOperation();
+  }
   if (conn.remoteChatTransport === "legacy") return legacyOperation();
   try {
     return await dashboardOperation();
@@ -639,6 +676,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     getMainWindow,
     notifyConnectionConfigChanged,
     notifyModelLibraryChanged,
+    notifyCustomProvidersChanged,
     openExternalUrl,
   } = context;
   const mainWindow = getMainWindow();
@@ -840,11 +878,15 @@ export function registerIpcHandlers(context: IpcContext): void {
     }),
   );
   ipcMain.handle("hermes-account-login-cancel", () => cancelDeviceLogin());
+  // The account is device-wide (one Hermes One login for the whole app), but
+  // account.json lives under whichever profile was active at sign-in. Resolve
+  // it app-wide so switching the active agent doesn't read as signed out, and
+  // sign out wherever the file lives.
   ipcMain.handle("hermes-account-get", (_event, profile?: string) =>
-    getAccount(profile),
+    getAccount(findAccountProfile() ?? profile),
   );
-  ipcMain.handle("hermes-account-logout", (_event, profile?: string) => {
-    clearAccount(profile);
+  ipcMain.handle("hermes-account-logout", () => {
+    clearAllAccounts();
     return { success: true };
   });
 
@@ -859,6 +901,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     return result;
   });
   ipcMain.handle("agent-sync-status", () => getAgentSyncStatus());
+  // The cloud agent id a profile is currently linked to (null when unlinked),
+  // for the per-profile Sync tab.
+  ipcMain.handle("agent-sync-linked-id", (_event, profile: string) =>
+    getLinkedAgentId(profile),
+  );
 
   // Configuration (profile-aware)
   ipcMain.handle("get-locale", () => getAppLocale());
@@ -1191,6 +1238,8 @@ export function registerIpcHandlers(context: IpcContext): void {
         ...existing,
         mode,
         remoteUrl,
+        remoteAuthMode:
+          existing.remoteUrl === remoteUrl ? existing.remoteAuthMode : "auto",
         apiKey: resolveConnectionApiKeyUpdate(
           existing,
           mode,
@@ -1246,6 +1295,56 @@ export function registerIpcHandlers(context: IpcContext): void {
     "test-remote-connection",
     (_event, url: string, apiKey?: string) => testRemoteConnection(url, apiKey),
   );
+
+  ipcMain.handle("probe-remote-auth-mode", async (_event, url: string) => {
+    const result = await probeRemoteAuthMode(url);
+    const conn = getConnectionConfig();
+    if (
+      conn.mode === "remote" &&
+      conn.remoteUrl.trim() === url.trim() &&
+      conn.remoteAuthMode !== result.authMode
+    ) {
+      setConnectionConfig({ ...conn, remoteAuthMode: result.authMode });
+      notifyConnectionConfigChanged();
+    }
+    return result;
+  });
+
+  ipcMain.handle("remote-oauth-login", async () => {
+    const loginConfig = getConnectionConfig();
+    if (loginConfig.mode !== "remote" || !loginConfig.remoteUrl.trim()) {
+      throw new Error("Configure a Remote gateway URL before signing in.");
+    }
+    const result = await openRemoteOAuthLogin(
+      loginConfig.remoteUrl,
+      context.getMainWindow(),
+    );
+    setConnectionConfig(
+      connectionConfigAfterRemoteOAuthLogin(
+        loginConfig.remoteUrl,
+        getConnectionConfig(),
+      ),
+    );
+    notifyConnectionConfigChanged();
+    return result;
+  });
+
+  ipcMain.handle("remote-oauth-logout", async () => {
+    const conn = getConnectionConfig();
+    if (conn.mode !== "remote" || !conn.remoteUrl.trim()) {
+      throw new Error("Remote gateway is not configured.");
+    }
+    await clearRemoteOAuthSession(conn.remoteUrl);
+    return { signedIn: false };
+  });
+
+  ipcMain.handle("remote-oauth-session-state", () => {
+    const conn = getConnectionConfig();
+    if (conn.mode !== "remote" || !conn.remoteUrl.trim()) {
+      return { signedIn: false };
+    }
+    return remoteOAuthSessionState(conn.remoteUrl);
+  });
 
   ipcMain.handle(
     "test-ssh-connection",
@@ -1635,10 +1734,25 @@ export function registerIpcHandlers(context: IpcContext): void {
     return isGatewayRunning();
   });
 
+  // Keep the native window appearance in step with the app's theme so the
+  // macOS sidebar vibrancy material is dark under a dark theme (and light under
+  // a light one) instead of following the system appearance — which is what
+  // made a dark theme on a light-mode Mac render a milky sidebar. "system" is
+  // passed through for the "System" theme so its `prefers-color-scheme` still
+  // tracks the OS. See the renderer's ThemeProvider.
+  ipcMain.handle("set-native-appearance", (_event, source: unknown) => {
+    if (source === "dark" || source === "light" || source === "system") {
+      nativeTheme.themeSource = source;
+    }
+  });
+
   // Dashboard/WebSocket transport probe. This is intentionally separate from
   // the current chat path while we validate the ordered event stream.
   ipcMain.handle("dashboard-status", (_event, profile?: string) =>
     getDashboardStatus(profile),
+  );
+  ipcMain.handle("fresh-dashboard-ws-url", (_event, profile?: string) =>
+    freshDashboardWebSocketUrl(profile),
   );
   ipcMain.handle("start-dashboard", (_event, profile?: string) =>
     startDashboard(profile),
@@ -2019,10 +2133,47 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, profile: string | undefined, id: string) =>
       deleteWallet(profile, id),
   );
+
+  // Custom (OpenAI-compatible) providers are desktop-local and profile-scoped.
+  // This store owns provider identity (name + base URL) so a configured
+  // provider renders as a card independent of whether a model is added yet; the
+  // key still lives in the profile `.env` and models in `models.json`.
+  ipcMain.handle("list-custom-providers", (_event, profile?: string) =>
+    listCustomProviders(profile),
+  );
+  ipcMain.handle(
+    "upsert-custom-provider",
+    (
+      _event,
+      profile: string | undefined,
+      input: { name: string; baseUrl: string },
+    ) => {
+      const record = upsertCustomProvider(profile, input);
+      notifyCustomProvidersChanged();
+      return record;
+    },
+  );
+  ipcMain.handle(
+    "remove-custom-provider",
+    (_event, profile: string | undefined, name: string) => {
+      removeCustomProvider(profile, name);
+      notifyCustomProvidersChanged();
+    },
+  );
   // Cloud wallets provisioned by the backend for the profile's linked agent.
   // Read-only here; the desktop no longer mints wallets locally.
   ipcMain.handle("wallet-sync", (_event, profile?: string) =>
     syncWalletsForProfile(profile),
+  );
+  // Backend-driven wallet ops used by the Office's space representatives
+  // (bank tellers): balances and provisioning both live server-side.
+  ipcMain.handle(
+    "wallet-portfolio",
+    (_event, profile: string | undefined, walletId: string) =>
+      getWalletPortfolio(profile, walletId),
+  );
+  ipcMain.handle("wallet-provision", (_event, profile?: string) =>
+    provisionAgentWallet(profile),
   );
   ipcMain.handle("get-token-balances", (_event, address: string) =>
     getTokenBalances(address),
@@ -2384,6 +2535,50 @@ export function registerIpcHandlers(context: IpcContext): void {
       return updated;
     },
   );
+
+  // Shared model definitions — per-model-id metadata (display name, context
+  // window, capabilities) reused across every provider that serves the model.
+  // Local-only, mirroring the existing scoping of the context-length override
+  // (the remote/SSH library paths never carried it); remote/ssh sessions get
+  // inert no-op results rather than an error.
+  ipcMain.handle("list-model-definitions", () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote" || conn.mode === "ssh") return [];
+    return listModelDefinitions();
+  });
+  ipcMain.handle("get-model-definition", (_event, model: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote" || conn.mode === "ssh") return null;
+    return getModelDefinition(model);
+  });
+  ipcMain.handle(
+    "set-model-definition",
+    (
+      _event,
+      model: string,
+      patch: {
+        name?: string;
+        contextLength?: number | null;
+        capabilities?: string[];
+        modalities?: { input?: string[]; output?: string[] };
+      },
+    ) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote" || conn.mode === "ssh") return null;
+      const def = setModelDefinition(model, patch);
+      // The gauge/picker read the merged model shape, so a definition change is
+      // a library change from the renderer's perspective.
+      notifyModelLibraryChanged();
+      return def;
+    },
+  );
+  ipcMain.handle("remove-model-definition", (_event, model: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote" || conn.mode === "ssh") return false;
+    const removed = removeModelDefinition(model);
+    if (removed) notifyModelLibraryChanged();
+    return removed;
+  });
 
   // Claw3D
   ipcMain.handle("claw3d-status", () => getClaw3dStatus());
@@ -2859,6 +3054,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     "add-mcp-server",
     (_event, input: McpServerInput, profile?: string) =>
       addMcpServer(input, profile),
+  );
+  ipcMain.handle(
+    "update-mcp-server",
+    (_event, originalName: string, input: McpServerInput, profile?: string) =>
+      updateMcpServer(originalName, input, profile),
   );
   ipcMain.handle(
     "remove-mcp-server",

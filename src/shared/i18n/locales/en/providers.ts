@@ -35,6 +35,11 @@ export default {
     title: "Models",
     empty: "No models yet.",
     addPlaceholder: "Add another model ID…",
+    displayName: "Display name",
+    contextWindow: "Context window (tokens)",
+    contextWindowPlaceholder: "Auto",
+    contextWindowHint:
+      "Shared across every provider serving this model. Leave blank to auto-detect.",
   },
   oauth: {
     sectionTitle: "Subscription / OAuth Plans",
@@ -58,7 +63,8 @@ export default {
     signIn: "Sign in to Hermes One",
     signOut: "Sign out",
     signedInAs: "Signed in as",
-    connected: "Connected · agents sync automatically",
+    connected: "Connected",
+    syncOn: "Sync on",
     modalTitle: "Sign in to Hermes One",
     codeHint: "Approve in your browser. Make sure it shows the same code:",
     waitingHint: "Waiting for approval…",

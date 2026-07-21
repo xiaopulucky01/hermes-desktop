@@ -36,6 +36,9 @@ interface LibModel {
   model: string;
   baseUrl: string;
   providerLabel?: string;
+  /** Context-window override, sourced from the shared model definition (keyed by
+   *  model id), so editing it here reflects under every provider serving it. */
+  contextLength?: number;
   createdAt: number;
 }
 
@@ -69,7 +72,19 @@ interface Props {
   onBlur: (key: string) => void | Promise<void>;
   onToggleVisibility: (key: string) => void;
   onRemove: (key: string) => void | Promise<void>;
+  /** Active profile — scopes the custom-provider store IPC calls. */
+  profile?: string;
 }
+
+// Best-effort display name recovered from an orphaned `CUSTOM_PROVIDER_<X>_KEY`
+// env var (a provider whose key was saved but whose identity record/models were
+// never persisted). It round-trips: `customProviderEnvKey(envKeyToName(k)) === k`,
+// so the recovered card's key field resolves to the same env var.
+const envKeyToName = (envKey: string): string =>
+  envKey
+    .replace(/^CUSTOM_PROVIDER_/, "")
+    .replace(/_KEY$/, "")
+    .toLowerCase();
 
 // Per-provider model manager, shown inside a provider's config modal — the
 // OpenCode-style "models under a provider" surface. It lists the library models
@@ -104,6 +119,11 @@ function ProviderModelsManager({
   const [loading, setLoading] = useState(true);
   const [modelId, setModelId] = useState("");
   const [busy, setBusy] = useState(false);
+  // Per-model definition editor (display name + context window). Keyed by model
+  // id, so a change here applies wherever that id is attached.
+  const [editing, setEditing] = useState<LibModel | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editContext, setEditContext] = useState("");
 
   const belongs = useCallback(
     (m: LibModel): boolean => {
@@ -135,7 +155,10 @@ function ProviderModelsManager({
     void reload();
   }, [reload]);
   // Keep in sync with adds/removes made elsewhere (Models screen, chat picker).
-  useEffect(() => window.hermesAPI.onModelLibraryChanged(() => void reload()), [reload]);
+  useEffect(
+    () => window.hermesAPI.onModelLibraryChanged(() => void reload()),
+    [reload],
+  );
 
   // Live model discovery drives the add-input's autocomplete. Custom endpoints
   // need the base URL; native providers resolve their list by id.
@@ -172,6 +195,25 @@ function ProviderModelsManager({
     await reload();
   }
 
+  function openEditor(m: LibModel): void {
+    setEditing(m);
+    setEditName(m.name && m.name !== m.model ? m.name : "");
+    setEditContext(m.contextLength ? String(m.contextLength) : "");
+  }
+
+  async function saveEditor(): Promise<void> {
+    if (!editing) return;
+    const ctxParsed = parseInt(editContext.trim(), 10);
+    await window.hermesAPI.setModelDefinition(editing.model, {
+      name: editName.trim() || undefined,
+      // Positive value sets the shared override; empty/invalid clears it.
+      contextLength:
+        Number.isFinite(ctxParsed) && ctxParsed > 0 ? ctxParsed : null,
+    });
+    setEditing(null);
+    await reload();
+  }
+
   // Derive the key-status line from live discovery. `ok` means the endpoint
   // accepted the key and returned a model list, so "verified" is truthful;
   // providers that don't expose /models fall back to a plain "Connected".
@@ -182,7 +224,8 @@ function ProviderModelsManager({
       ? { tone: "loading", text: t("providers.keys.status.verifying") }
       : discovery.status === "ok"
         ? { tone: "ok", text: t("providers.keys.status.verified") }
-        : discovery.status === "unsupported" || discovery.status === "unknown-host"
+        : discovery.status === "unsupported" ||
+            discovery.status === "unknown-host"
           ? { tone: "ok", text: t("providers.keys.status.connected") }
           : discovery.status === "error"
             ? { tone: "muted", text: t("providers.keys.status.failed") }
@@ -201,7 +244,9 @@ function ProviderModelsManager({
 
       <div className="provider-models">
         <div className="provider-models-head">
-          <span className="provider-models-title">{t("providers.models.title")}</span>
+          <span className="provider-models-title">
+            {t("providers.models.title")}
+          </span>
         </div>
 
         {loading ? (
@@ -212,8 +257,24 @@ function ProviderModelsManager({
           models.length > 0 && (
             <div className="provider-models-chips">
               {models.map((m) => (
-                <span key={m.id} className="provider-model-chip" title={m.model}>
+                <span
+                  key={m.id}
+                  className="provider-model-chip"
+                  title={
+                    m.contextLength
+                      ? `${m.model} · ${m.contextLength.toLocaleString()} ctx`
+                      : m.model
+                  }
+                >
                   <span className="provider-model-chip-label">{m.model}</span>
+                  <button
+                    type="button"
+                    className="provider-model-chip-edit"
+                    onClick={() => openEditor(m)}
+                    aria-label={t("common.edit")}
+                  >
+                    <Pencil size={12} />
+                  </button>
                   <button
                     type="button"
                     className="provider-model-chip-del"
@@ -260,6 +321,73 @@ function ProviderModelsManager({
           </button>
         </div>
       </div>
+
+      {editing && (
+        <div className="models-modal-overlay" onClick={() => setEditing(null)}>
+          <div
+            className="models-modal provider-model-edit-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="models-modal-header">
+              <h2 className="models-modal-title">{editing.model}</h2>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setEditing(null)}
+                aria-label={t("common.close")}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="models-modal-body">
+              <div className="models-modal-field">
+                <label className="models-modal-label">
+                  {t("providers.models.displayName")}
+                </label>
+                <input
+                  className="input"
+                  type="text"
+                  value={editName}
+                  autoFocus
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder={editing.model}
+                />
+              </div>
+              <div className="models-modal-field">
+                <label className="models-modal-label">
+                  {t("providers.models.contextWindow")}
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step={1024}
+                  value={editContext}
+                  onChange={(e) => setEditContext(e.target.value)}
+                  placeholder={t("providers.models.contextWindowPlaceholder")}
+                />
+                <span className="models-modal-hint">
+                  {t("providers.models.contextWindowHint")}
+                </span>
+              </div>
+            </div>
+            <div className="models-modal-footer">
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setEditing(null)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => void saveEditor()}
+              >
+                {t("common.save")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -273,6 +401,7 @@ export function ProviderKeysSection({
   onBlur,
   onToggleVisibility,
   onRemove,
+  profile,
 }: Props): React.JSX.Element {
   const { t } = useI18n();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -284,9 +413,11 @@ export function ProviderKeysSection({
     name: string;
     baseUrl: string;
   } | null>(null);
-  // Already-added custom providers, derived from the model library (there's no
-  // separate store — a custom provider *is* its name + base URL + models).
-  const [customProviders, setCustomProviders] = useState<
+  // Configured custom providers loaded from the desktop's per-profile store
+  // (`providers.json`) unioned with any legacy providers still only present as
+  // `models.json` rows. `customProviders` (below) further folds in orphan
+  // recovery from `env`.
+  const [storedProviders, setStoredProviders] = useState<
     { name: string; baseUrl: string }[]
   >([]);
 
@@ -296,62 +427,106 @@ export function ProviderKeysSection({
     () => items.filter((f) => f.key !== CUSTOM_API_KEY_ENV),
     [items],
   );
-  const isSet = (k: string) => !!(env[k] && env[k].trim());
+  const isSet = useCallback(
+    (k: string): boolean => !!(env[k] && env[k].trim()),
+    [env],
+  );
   const configured = useMemo(
     () => keyItems.filter((f) => isSet(f.key)),
-    [keyItems, env],
+    [keyItems, isSet],
   );
   const available = useMemo(() => {
     const q = search.trim().toLowerCase();
     return keyItems.filter(
       (f) => !isSet(f.key) && (!q || t(f.label).toLowerCase().includes(q)),
     );
-  }, [keyItems, env, search, t]);
+  }, [keyItems, isSet, search, t]);
 
-  // A custom provider is a `custom`-routed model whose host we don't recognise
-  // (unknown host → CUSTOM_API_KEY). Known compat hosts (groq, hermesone, …)
-  // are configured via their own key cards, so we exclude them here. Group by
-  // provider label (name), falling back to the host for legacy unlabeled models.
-  const loadCustom = useCallback(async () => {
-    const all = (await window.hermesAPI.listModels()) as LibModel[];
+  // Load configured custom providers: the authoritative `providers.json` records
+  // (so a keyed provider shows even with zero models), unioned with legacy
+  // providers that only exist as `models.json` rows (unknown host → CUSTOM_API_KEY;
+  // known compat hosts like groq/hermesone own dedicated key cards and are
+  // excluded). Deduped by the derived env-key anchor.
+  const loadStored = useCallback(async () => {
     const seen = new Set<string>();
     const list: { name: string; baseUrl: string }[] = [];
+    const push = (name: string, baseUrl: string): void => {
+      if (!name) return;
+      const anchor = customProviderEnvKey(name);
+      if (seen.has(anchor)) return;
+      seen.add(anchor);
+      list.push({ name, baseUrl });
+    };
+
+    try {
+      const records = await window.hermesAPI.listCustomProviders(profile);
+      for (const r of records) push(r.name, r.baseUrl);
+    } catch {
+      /* store unavailable — fall back to the models-derived list below */
+    }
+
+    const all = (await window.hermesAPI.listModels()) as LibModel[];
     for (const m of all) {
       if (m.provider !== "custom" || !m.baseUrl) continue;
       if (expectedEnvKeyForUrl(m.baseUrl) !== CUSTOM_API_KEY_ENV) continue;
-      const name = m.providerLabel || hostOf(m.baseUrl);
-      const key = m.providerLabel
-        ? `label:${m.providerLabel}`
-        : `url:${normUrl(m.baseUrl)}`;
+      push(m.providerLabel || hostOf(m.baseUrl), m.baseUrl);
+    }
+    setStoredProviders(list);
+  }, [profile]);
+  useEffect(() => {
+    void loadStored();
+    const offModels = window.hermesAPI.onModelLibraryChanged(
+      () => void loadStored(),
+    );
+    const offProviders = window.hermesAPI.onCustomProvidersChanged(
+      () => void loadStored(),
+    );
+    return () => {
+      offModels();
+      offProviders();
+    };
+  }, [loadStored]);
+
+  // Final card list: stored providers plus "orphan recovery" — any
+  // `CUSTOM_PROVIDER_*_KEY` env var with a value but no matching record/model
+  // (a provider whose key was saved before its identity was persisted). These
+  // surface with an empty base URL so the user can complete or remove them.
+  const customProviders = useMemo(() => {
+    const seen = new Set(
+      storedProviders.map((p) => customProviderEnvKey(p.name)),
+    );
+    const list = [...storedProviders];
+    for (const key of Object.keys(env)) {
+      if (!/^CUSTOM_PROVIDER_.+_KEY$/.test(key)) continue;
+      if (!env[key] || !env[key].trim()) continue;
       if (seen.has(key)) continue;
       seen.add(key);
-      list.push({ name, baseUrl: m.baseUrl });
+      list.push({ name: envKeyToName(key), baseUrl: "" });
     }
-    setCustomProviders(list);
-  }, []);
-  useEffect(() => {
-    void loadCustom();
-    return window.hermesAPI.onModelLibraryChanged(() => void loadCustom());
-  }, [loadCustom]);
+    return list;
+  }, [storedProviders, env]);
 
-  function openConfig(field: FieldDef) {
+  function openConfig(field: FieldDef): void {
     setPickerOpen(false);
     setEditing(field);
   }
 
-  function openCustom(name: string, baseUrl: string) {
+  function openCustom(name: string, baseUrl: string): void {
     setPickerOpen(false);
     setCustomEditing({ name, baseUrl });
   }
 
-  async function removeAndClose(field: FieldDef) {
+  async function removeAndClose(field: FieldDef): Promise<void> {
     await onRemove(field.key);
     setEditing(null);
   }
 
   // Remove a custom provider: delete its models (matched by label, or base URL
-  // for legacy unlabeled ones), then clear its dedicated key.
-  async function removeCustomAndClose(name: string, baseUrl: string) {
+  // for legacy unlabeled ones), drop its identity record, then clear its key.
+  async function removeCustomAndClose(
+    name: string,
+    baseUrl: string,
+  ): Promise<void> {
     const all = (await window.hermesAPI.listModels()) as LibModel[];
     const target = normUrl(baseUrl);
     for (const m of all) {
@@ -362,8 +537,11 @@ export function ProviderKeysSection({
         : normUrl(m.baseUrl) === target;
       if (match) await window.hermesAPI.removeModel(m.id);
     }
-    if (name) await onRemove(customProviderEnvKey(name));
-    await loadCustom();
+    if (name) {
+      await window.hermesAPI.removeCustomProvider(profile, name);
+      await onRemove(customProviderEnvKey(name));
+    }
+    await loadStored();
     setCustomEditing(null);
   }
 
@@ -380,12 +558,20 @@ export function ProviderKeysSection({
           >
             <BrandLogo provider={field.key} size={22} />
             <span className="provider-config-card-body">
-              <span className="provider-config-card-title">{t(field.label)}</span>
+              <span className="provider-config-card-title">
+                {t(field.label)}
+              </span>
               <span className="provider-config-card-sub">
-                {visibleKeys.has(field.key) ? env[field.key] : "•••••••• key set"}
+                {visibleKeys.has(field.key)
+                  ? env[field.key]
+                  : "•••••••• key set"}
               </span>
             </span>
-            <Pencil className="provider-config-card-edit" size={15} aria-hidden />
+            <Pencil
+              className="provider-config-card-edit"
+              size={15}
+              aria-hidden
+            />
           </button>
         ))}
 
@@ -401,11 +587,19 @@ export function ProviderKeysSection({
               <span className="provider-config-card-title">{cp.name}</span>
               <span className="provider-config-card-sub">{cp.baseUrl}</span>
             </span>
-            <Pencil className="provider-config-card-edit" size={15} aria-hidden />
+            <Pencil
+              className="provider-config-card-edit"
+              size={15}
+              aria-hidden
+            />
           </button>
         ))}
 
-        <button type="button" className="provider-add-card" onClick={() => setPickerOpen(true)}>
+        <button
+          type="button"
+          className="provider-add-card"
+          onClick={() => setPickerOpen(true)}
+        >
           <Plus size={18} />
           <span>{t("providers.keys.addProvider")}</span>
         </button>
@@ -417,11 +611,20 @@ export function ProviderKeysSection({
 
       {/* Picker: choose a provider to configure */}
       {pickerOpen && (
-        <div className="models-modal-overlay" onClick={() => setPickerOpen(false)}>
+        <div
+          className="models-modal-overlay"
+          onClick={() => setPickerOpen(false)}
+        >
           <div className="models-modal" onClick={(e) => e.stopPropagation()}>
             <div className="models-modal-header">
-              <h2 className="models-modal-title">{t("providers.keys.addProvider")}</h2>
-              <button className="btn-ghost" onClick={() => setPickerOpen(false)} aria-label={t("common.close")}>
+              <h2 className="models-modal-title">
+                {t("providers.keys.addProvider")}
+              </h2>
+              <button
+                className="btn-ghost"
+                onClick={() => setPickerOpen(false)}
+                aria-label={t("common.close")}
+              >
                 <X size={18} />
               </button>
             </div>
@@ -446,8 +649,12 @@ export function ProviderKeysSection({
                   >
                     <BrandLogo provider={field.key} size={22} />
                     <span className="provider-picker-item-body">
-                      <span className="provider-picker-item-title">{t(field.label)}</span>
-                      <span className="provider-picker-item-hint">{t(field.hint)}</span>
+                      <span className="provider-picker-item-title">
+                        {t(field.label)}
+                      </span>
+                      <span className="provider-picker-item-hint">
+                        {t(field.hint)}
+                      </span>
                     </span>
                   </button>
                 ))}
@@ -476,7 +683,10 @@ export function ProviderKeysSection({
       {/* Config: enter / edit / remove a provider's key */}
       {editing && (
         <div className="models-modal-overlay" onClick={() => setEditing(null)}>
-          <div className="models-modal provider-modal" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="models-modal provider-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="models-modal-header">
               <h2 className="models-modal-title provider-modal-title">
                 <span className="provider-modal-logo">
@@ -487,7 +697,11 @@ export function ProviderKeysSection({
                   <span className="settings-saved">{t("common.saved")}</span>
                 )}
               </h2>
-              <button className="btn-ghost" onClick={() => setEditing(null)} aria-label={t("common.close")}>
+              <button
+                className="btn-ghost"
+                onClick={() => setEditing(null)}
+                aria-label={t("common.close")}
+              >
                 <X size={18} />
               </button>
             </div>
@@ -497,23 +711,38 @@ export function ProviderKeysSection({
                 <input
                   className="input"
                   autoFocus
-                  type={editing.type === "password" && !visibleKeys.has(editing.key) ? "password" : "text"}
+                  type={
+                    editing.type === "password" && !visibleKeys.has(editing.key)
+                      ? "password"
+                      : "text"
+                  }
                   value={env[editing.key] || ""}
                   onChange={(e) => onChange(editing.key, e.target.value)}
                   onBlur={() => onBlur(editing.key)}
                   placeholder={t(editing.label)}
                 />
                 {editing.type === "password" && (
-                  <button className="btn-ghost settings-toggle-btn" onClick={() => onToggleVisibility(editing.key)}>
-                    {visibleKeys.has(editing.key) ? t("common.hide") : t("common.show")}
+                  <button
+                    className="btn-ghost settings-toggle-btn"
+                    onClick={() => onToggleVisibility(editing.key)}
+                  >
+                    {visibleKeys.has(editing.key)
+                      ? t("common.hide")
+                      : t("common.show")}
                   </button>
                 )}
               </div>
-              <ProviderModelsManager envKey={editing.key} apiKey={env[editing.key] || ""} />
+              <ProviderModelsManager
+                envKey={editing.key}
+                apiKey={env[editing.key] || ""}
+              />
             </div>
             <div className="models-modal-footer">
               {isSet(editing.key) && (
-                <button className="btn btn-ghost btn-sm provider-remove-btn" onClick={() => void removeAndClose(editing)}>
+                <button
+                  className="btn btn-ghost btn-sm provider-remove-btn"
+                  onClick={() => void removeAndClose(editing)}
+                >
                   {t("providers.keys.remove")}
                 </button>
               )}
@@ -543,13 +772,29 @@ export function ProviderKeysSection({
             : CUSTOM_API_KEY_ENV;
           const ready = !!name.trim() && !!baseUrl.trim();
           const isExisting = customProviders.some(
-            (cp) => cp.name === name && normUrl(cp.baseUrl) === normUrl(baseUrl),
+            (cp) =>
+              cp.name === name && normUrl(cp.baseUrl) === normUrl(baseUrl),
           );
           const keyType = !visibleKeys.has(keyEnv) ? "password" : "text";
-          const close = () => void loadCustom().then(() => setCustomEditing(null));
+          // Persist the provider's identity (name + base URL) to providers.json
+          // so its card survives even with no models added, then refresh + close.
+          const close = (): void => {
+            const finish = (): Promise<void> =>
+              loadStored().then(() => setCustomEditing(null));
+            if (ready) {
+              void window.hermesAPI
+                .upsertCustomProvider(profile, { name, baseUrl })
+                .then(finish, finish);
+            } else {
+              void finish();
+            }
+          };
           return (
             <div className="models-modal-overlay" onClick={close}>
-              <div className="models-modal provider-modal" onClick={(e) => e.stopPropagation()}>
+              <div
+                className="models-modal provider-modal"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="models-modal-header">
                   <h2 className="models-modal-title provider-modal-title">
                     <span className="provider-modal-logo">
@@ -557,17 +802,27 @@ export function ProviderKeysSection({
                     </span>
                     {t("providers.keys.custom.title")}
                     {savedKey === keyEnv && (
-                      <span className="settings-saved">{t("common.saved")}</span>
+                      <span className="settings-saved">
+                        {t("common.saved")}
+                      </span>
                     )}
                   </h2>
-                  <button className="btn-ghost" onClick={close} aria-label={t("common.close")}>
+                  <button
+                    className="btn-ghost"
+                    onClick={close}
+                    aria-label={t("common.close")}
+                  >
                     <X size={18} />
                   </button>
                 </div>
                 <div className="models-modal-body">
                   <div className="provider-key-group">
                     <div className="settings-input-row provider-key-row">
-                      <Tag className="provider-key-icon" size={16} aria-hidden />
+                      <Tag
+                        className="provider-key-icon"
+                        size={16}
+                        aria-hidden
+                      />
                       <input
                         className="input"
                         autoFocus
@@ -580,19 +835,32 @@ export function ProviderKeysSection({
                       />
                     </div>
                     <div className="settings-input-row provider-key-row">
-                      <Globe className="provider-key-icon" size={16} aria-hidden />
+                      <Globe
+                        className="provider-key-icon"
+                        size={16}
+                        aria-hidden
+                      />
                       <input
                         className="input"
                         type="text"
                         value={baseUrl}
                         onChange={(e) =>
-                          setCustomEditing({ name, baseUrl: e.target.value.trim() })
+                          setCustomEditing({
+                            name,
+                            baseUrl: e.target.value.trim(),
+                          })
                         }
-                        placeholder={t("providers.keys.custom.baseUrlPlaceholder")}
+                        placeholder={t(
+                          "providers.keys.custom.baseUrlPlaceholder",
+                        )}
                       />
                     </div>
                     <div className="settings-input-row provider-key-row">
-                      <KeyRound className="provider-key-icon" size={16} aria-hidden />
+                      <KeyRound
+                        className="provider-key-icon"
+                        size={16}
+                        aria-hidden
+                      />
                       <input
                         className="input"
                         type={keyType}
@@ -605,7 +873,9 @@ export function ProviderKeysSection({
                         className="btn-ghost settings-toggle-btn"
                         onClick={() => onToggleVisibility(keyEnv)}
                       >
-                        {visibleKeys.has(keyEnv) ? t("common.hide") : t("common.show")}
+                        {visibleKeys.has(keyEnv)
+                          ? t("common.hide")
+                          : t("common.show")}
                       </button>
                     </div>
                   </div>

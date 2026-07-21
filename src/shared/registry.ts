@@ -39,6 +39,8 @@ export interface RegistryItem {
   githubPath?: string;
   /** A2A service: local filesystem path (dev catalog). */
   localPath?: string;
+  /** Absolute raw URL of the entry's icon, when the registry provides one. */
+  icon?: string;
 }
 
 export interface RegistryCatalog {
