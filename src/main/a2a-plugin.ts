@@ -16,11 +16,25 @@ import { randomBytes } from "crypto";
 import { app } from "electron";
 import { readEnv, setEnvValue } from "./config";
 import { profilePaths, safeWriteFile } from "./utils";
+import { readSoul, writeSoul } from "./soul";
 
 const PLUGIN_REL = join("plugins", "platforms", "a2a");
 export const A2A_PLUGIN_NAME = "a2a-platform";
 export const A2A_TOOLSET_NAME = "a2a";
 export const A2A_DEFAULT_PORT = 9900;
+
+const A2A_ORCHESTRATOR_MARKER = "<!-- hermes-a2a-orchestrator -->";
+const A2A_ORCHESTRATOR_HINT = `${A2A_ORCHESTRATOR_MARKER}
+## External A2A experts
+
+When the user's request matches a specialist capability available via A2A peers:
+1. Call \`a2a_registry_list\` (or equivalent) to see registered experts and their skills.
+2. Choose the best match by skill/description — never invent endpoints.
+3. Call \`a2a_delegate\` with that endpoint and a clear task message.
+4. Reply to the user in natural language with the result. Do not expose tool names unless asked.
+
+If no peer fits, handle the request yourself. If a peer is installed but unreachable, say so briefly and continue without it.
+`;
 
 function pluginYamlPath(dir: string): string {
   return join(dir, "plugin.yaml");
@@ -398,4 +412,21 @@ export function ensureA2aEnv(profile?: string): boolean {
     console.log("[a2a] Auto-configured A2A bearer token and bind host in .env");
   }
   return changed;
+}
+
+/**
+ * Append an orchestrator hint to SOUL.md so the main agent auto-routes via
+ * a2a_registry_list → a2a_delegate. Idempotent via an HTML comment marker.
+ */
+export function ensureA2aOrchestratorHint(profile?: string): boolean {
+  // @lat: [[lat.md/agent-services#Agent services#Orchestrator routing]]
+  const current = readSoul(profile);
+  if (current.includes(A2A_ORCHESTRATOR_MARKER)) return false;
+  const base = current.trim();
+  const next = base
+    ? `${base}\n\n${A2A_ORCHESTRATOR_HINT}`
+    : A2A_ORCHESTRATOR_HINT;
+  if (!writeSoul(next, profile)) return false;
+  console.log("[a2a] Appended A2A orchestrator hint to SOUL.md");
+  return true;
 }

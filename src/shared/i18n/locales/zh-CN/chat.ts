@@ -79,6 +79,8 @@ export default {
   },
   queuedCancel: "从队列中移除",
   copyMessage: "复制消息",
+  expertsLabel: "可用专家",
+  expertsPreferHint: "[优先使用 A2A 专家：{{name}}（{{endpoint}}）]\n",
   worktree: {
     loading: "加载中",
     empty: "文件夹为空",

@@ -1195,6 +1195,7 @@ const hermesAPI = {
       id: string;
       name: string;
       version: string;
+      description?: string;
       enabled: boolean;
       status: "stopped" | "starting" | "running" | "error";
       port?: number;
@@ -1202,6 +1203,13 @@ const hermesAPI = {
       card_url?: string;
       last_error?: string | null;
       link_path?: string;
+      has_venv?: boolean;
+      ui?: {
+        type?: "none" | "webview" | "static";
+        url?: string;
+        path?: string;
+        title?: string;
+      };
     }>
   > => ipcRenderer.invoke("agent-services-list"),
   installAgentServiceFromPath: (
@@ -1239,6 +1247,85 @@ const hermesAPI = {
   }> => ipcRenderer.invoke("agent-services-start", id),
   stopAgentService: (id: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("agent-services-stop", id),
+  getAgentServiceUiUrl: (
+    id: string,
+  ): Promise<{
+    success: boolean;
+    url?: string;
+    title?: string;
+    error?: string;
+  }> => ipcRenderer.invoke("agent-services-ui-url", id),
+  openAgentServiceUi: (
+    id: string,
+  ): Promise<{
+    success: boolean;
+    url?: string;
+    title?: string;
+    error?: string;
+  }> => ipcRenderer.invoke("agent-services-open-ui", id),
+  listA2aExperts: (): Promise<
+    Array<{
+      key: string;
+      name: string;
+      description: string;
+      endpoint: string;
+      service_id?: string;
+      skills: unknown[];
+      streaming: boolean;
+    }>
+  > => ipcRenderer.invoke("agent-services-list-experts"),
+  ensureAgentServiceRunning: (id: string): Promise<{
+    success: boolean;
+    error?: string;
+    port?: number;
+    base_url?: string;
+    card_url?: string;
+  }> => ipcRenderer.invoke("agent-services-ensure-running", id),
+  ensureAgentServiceRunningByEndpoint: (
+    endpointOrServiceId: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    id?: string;
+    port?: number;
+    base_url?: string;
+    card_url?: string;
+  }> =>
+    ipcRenderer.invoke(
+      "agent-services-ensure-running-by-endpoint",
+      endpointOrServiceId,
+    ),
+  setAgentServiceEnabled: (
+    id: string,
+    enabled: boolean,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("agent-services-set-enabled", id, enabled),
+  scaffoldAgentService: (opts: {
+    id: string;
+    name?: string;
+    description?: string;
+    destDir?: string;
+    templateDir?: string;
+  }): Promise<{ success: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke("agent-services-scaffold", opts),
+  listAgentServiceUpdates: (): Promise<
+    Array<{
+      id: string;
+      currentVersion: string | null;
+      availableVersion: string | null;
+      updateAvailable: boolean;
+      archiveUrl?: string;
+      archiveSha256?: string;
+    }>
+  > => ipcRenderer.invoke("agent-services-list-updates"),
+  applyAgentServiceUpdate: (
+    id: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    port?: number;
+    base_url?: string;
+  }> => ipcRenderer.invoke("agent-services-apply-update", id),
 
   // Updates
   checkForUpdates: (): Promise<string | null> =>

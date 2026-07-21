@@ -114,7 +114,7 @@ Six protocol-generic client tools; routing uses endpoint URLs and Agent Card ski
 
 Orchestration flow: discover unknown URL → match skills from registry → delegate by endpoint URL → watch task log or poll status.
 
-Installed third-party A2A services (CrewAI bridge, etc.) are managed by [[lat.md/agent-services#Agent services]] — Hermes starts them, assigns ports, and upserts their Agent Cards into the same runtime registry.
+Installed third-party A2A services (isolated packages under agent-services) are managed by [[agent-services]] — Hermes starts each with its own `.venv` and port, then upserts Agent Cards into the runtime registry. Users speak natural language; the orchestrator calls `a2a_delegate` internally.
 
 ### Streaming and task trace
 

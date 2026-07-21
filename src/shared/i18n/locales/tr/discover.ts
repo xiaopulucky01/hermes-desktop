@@ -7,6 +7,7 @@ export default {
     mcps: "MCP'ler",
     agents: "Ajanlar",
     workflows: "İş Akışları",
+    a2aServices: "A2A Servisleri",
   },
   searchPlaceholder: "{{kind}} ara...",
   refresh: "Yenile",

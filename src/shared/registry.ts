@@ -4,7 +4,12 @@
  * (fetch + install) and the renderer (browse UI).
  */
 
-export type RegistryKind = "skills" | "mcps" | "agents" | "workflows";
+export type RegistryKind =
+  | "skills"
+  | "mcps"
+  | "agents"
+  | "workflows"
+  | "a2aServices";
 
 export interface RegistryItem {
   /** Stable identifier, unique within its kind. */
@@ -22,6 +27,18 @@ export interface RegistryItem {
   path?: string;
   /** Bundled skills only: install identifier for `hermes skills install`. */
   source?: string;
+  /** A2A service: direct archive download URL. */
+  archiveUrl?: string;
+  /** A2A service: expected sha256 of the archive. */
+  archiveSha256?: string;
+  /** A2A service: GitHub repo `owner/name`. */
+  githubRepo?: string;
+  /** A2A service: git ref (branch/tag/sha). */
+  githubRef?: string;
+  /** A2A service: subdirectory inside the repo/zip. */
+  githubPath?: string;
+  /** A2A service: local filesystem path (dev catalog). */
+  localPath?: string;
 }
 
 export interface RegistryCatalog {
@@ -29,12 +46,14 @@ export interface RegistryCatalog {
   mcps: RegistryItem[];
   agents: RegistryItem[];
   workflows: RegistryItem[];
+  a2aServices: RegistryItem[];
 }
 
 export interface InstalledRegistry {
   skills: string[];
   mcps: string[];
   workflows: string[];
+  a2aServices: string[];
 }
 
 /** One labeled row in a structured (non-prose) detail view. */

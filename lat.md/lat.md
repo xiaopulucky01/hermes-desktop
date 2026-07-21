@@ -21,5 +21,5 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[bundled-runtime#Bundled runtime]] — the prepare-runtime Python bundle under `resources/python/`, including `[acp]` extras for IDE integration.
 - [[acp-integration#ACP integration]] — IDE integration via the Agent Client Protocol: a desktop-generated launcher script that spawns upstream `hermes acp` with the correct env for Zed, JetBrains, and other ACP clients.
 - [[a2a-integration#A2A integration]] — standalone A2A platform plugin in sibling `../hermes-a2a` (or packaged `resources/hermes-a2a`); auto-linked and gateway booted on app launch.
-- [[lat.md/agent-services#Agent services]] — install, supervise, and auto-register cloud or dev-linked A2A agent services under `%HERMES_HOME%/agent-services/`.
+- [[agent-services]] — install, supervise, and auto-register cloud or dev-linked A2A agent services under `%HERMES_HOME%/agent-services/`.
 - [[wallet-token-balances]] — profile-scoped Base mainnet wallets with encrypted recovery phrases, and on-chain ERC-20 token balance reads via ethers v6.

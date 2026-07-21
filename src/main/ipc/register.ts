@@ -145,8 +145,20 @@ import {
   installAgentServiceFromPath,
   installAndStartAgentServiceFromPath,
   listAgentServiceStatuses,
+  listA2aRegistryExperts,
+  openAgentServiceUi,
+  ensureAgentServiceRunning,
+  ensureAgentServiceRunningByEndpoint,
+  readManifest,
+  resolveAgentServiceUiUrl,
+  resolveDefaultAgentTemplateDir,
+  scaffoldAgentService,
   startAgentService,
   stopAgentService,
+  upsertCatalogEntry,
+  checkAgentServiceUpdate,
+  listAgentServiceUpdates,
+  installAgentServiceFromGitHub,
 } from "../agent-services";
 import { startOfficeStack } from "../office-start";
 import {
@@ -2445,6 +2457,107 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
   ipcMain.handle("agent-services-stop", (_event, id: string) =>
     stopAgentService(id),
+  );
+  ipcMain.handle("agent-services-ui-url", (_event, id: string) =>
+    resolveAgentServiceUiUrl(id),
+  );
+  ipcMain.handle("agent-services-open-ui", (_event, id: string) =>
+    openAgentServiceUi(id),
+  );
+  ipcMain.handle("agent-services-list-experts", () => listA2aRegistryExperts());
+  ipcMain.handle("agent-services-ensure-running", (_event, id: string) =>
+    ensureAgentServiceRunning(id),
+  );
+  ipcMain.handle(
+    "agent-services-ensure-running-by-endpoint",
+    (_event, endpointOrServiceId: string) =>
+      ensureAgentServiceRunningByEndpoint(endpointOrServiceId),
+  );
+  ipcMain.handle(
+    "agent-services-set-enabled",
+    (_event, id: string, enabled: boolean) => {
+      const manifest = readManifest(id);
+      if (!manifest) return { success: false, error: "Not installed" };
+      upsertCatalogEntry(manifest, { enabled });
+      return { success: true };
+    },
+  );
+  ipcMain.handle(
+    "agent-services-scaffold",
+    (
+      _event,
+      opts: {
+        id: string;
+        name?: string;
+        description?: string;
+        destDir?: string;
+        templateDir?: string;
+      },
+    ) => {
+      const templateDir =
+        opts.templateDir ||
+        resolveDefaultAgentTemplateDir() ||
+        "";
+      if (!templateDir) {
+        return {
+          success: false,
+          error:
+            "agents-template template not found (expected ../agent-services/agents-template)",
+        };
+      }
+      const destDir =
+        opts.destDir ||
+        // Default next to template: agent-services/agents
+        templateDir.replace(/agents-template[/\\]?$/, "agents").replace(
+          /agents-bridge[/\\]?$/,
+          "agents",
+        );
+      return scaffoldAgentService({
+        id: opts.id,
+        name: opts.name,
+        description: opts.description,
+        destDir,
+        templateDir,
+      });
+    },
+  );
+  ipcMain.handle("agent-services-list-updates", async () => {
+    const catalog = await fetchRegistry(false);
+    return listAgentServiceUpdates(catalog.a2aServices || []);
+  });
+  ipcMain.handle(
+    "agent-services-apply-update",
+    async (_event, id: string) => {
+      const catalog = await fetchRegistry(true);
+      const item = (catalog.a2aServices || []).find((e) => e.id === id);
+      if (!item) return { success: false, error: `No catalog entry for ${id}` };
+      const info = checkAgentServiceUpdate(item);
+      if (!info.updateAvailable) {
+        return { success: false, error: "No update available" };
+      }
+      if (item.archiveUrl) {
+        const installed = await installAgentServiceFromArchive(item.archiveUrl, {
+          expectedId: id,
+          expectedSha256: item.archiveSha256,
+        });
+        if (!installed.success || !installed.id) return installed;
+        return startAgentService(installed.id);
+      }
+      if (item.githubRepo) {
+        const installed = await installAgentServiceFromGitHub(
+          item.githubRepo,
+          item.githubRef || "main",
+          item.githubPath,
+          id,
+        );
+        if (!installed.success || !installed.id) return installed;
+        return startAgentService(installed.id);
+      }
+      return {
+        success: false,
+        error: "Catalog entry has no archiveUrl or githubRepo for update",
+      };
+    },
   );
 
   ipcMain.handle("claw3d-start-dev", () => startDevServer());

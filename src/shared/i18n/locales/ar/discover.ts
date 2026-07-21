@@ -6,6 +6,7 @@ export default {
     mcps: "MCPs",
     agents: "الوكلاء",
     workflows: "سير العمل",
+    a2aServices: "خدمات A2A",
   },
   searchPlaceholder: "ابحث عن {{kind}}...",
   refresh: "تحديث",

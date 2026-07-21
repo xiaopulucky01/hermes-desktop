@@ -20,7 +20,38 @@ export default {
     about: "About & Updates",
     community: "Community",
     ide: "IDE Integration",
+    agentServices: "A2A Agents",
     logs: "Logs & Diagnostics",
+  },
+  agentServices: {
+    intro:
+      "Installed A2A agents share agent-services shared-venv and each get their own port. Hermes delegates over A2A — you do not need to call tools by name.",
+    cardTitle: "Installed agents",
+    cardSubtitle: "Local A2A services supervised by Hermes",
+    count: "{{count}} installed",
+    refresh: "Refresh",
+    emptyTitle: "No agents installed",
+    empty:
+      "Install an agent from Discover, or scaffold a new package from the template to get started.",
+    emptyHint: "Dev link: HERMES_AGENT_SERVICES_DEV_LINK",
+    start: "Start",
+    stop: "Stop",
+    openUi: "Open UI",
+    scaffold: "New from template",
+    scaffoldPromptId: "New agent id (kebab-case, e.g. code-agent):",
+    scaffoldPromptName: "Display name:",
+    scaffoldDone:
+      "Scaffolded at {{path}}. Install deps, then link or Discover-install.",
+    updatesTitle: "Available updates",
+    updatesSubtitle: "{{count}} agent(s) can be updated",
+    applyUpdate: "Update",
+    updateApplied: "Updated {{id}}",
+    updateAvailable: "update v{{version}}",
+    noVenv: "no venv",
+    statusRunning: "Running",
+    statusStopped: "Stopped",
+    statusStarting: "Starting",
+    statusError: "Error",
   },
   acp: {
     intro:

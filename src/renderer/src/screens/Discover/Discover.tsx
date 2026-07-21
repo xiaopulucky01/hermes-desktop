@@ -12,6 +12,7 @@ import {
   Plug,
   Bot,
   Workflow as WorkflowIcon,
+  Sparkles,
 } from "../../assets/icons";
 import type { LucideIcon } from "lucide-react";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
@@ -37,6 +38,7 @@ const KINDS: { key: RegistryKind; icon: LucideIcon }[] = [
   { key: "mcps", icon: Plug },
   { key: "agents", icon: Bot },
   { key: "workflows", icon: WorkflowIcon },
+  { key: "a2aServices", icon: Sparkles },
 ];
 
 // Per-kind setup action: distinct icon + i18n group so each card reads clearly
@@ -46,6 +48,7 @@ const ACTION: Record<RegistryKind, { icon: LucideIcon; i18n: string }> = {
   mcps: { icon: Download, i18n: "install" },
   agents: { icon: Plus, i18n: "create" },
   workflows: { icon: Download, i18n: "install" },
+  a2aServices: { icon: Download, i18n: "install" },
 };
 
 const EMPTY: RegistryCatalog = {
@@ -53,6 +56,7 @@ const EMPTY: RegistryCatalog = {
   mcps: [],
   agents: [],
   workflows: [],
+  a2aServices: [],
 };
 
 type ActionState = "idle" | "working" | "done" | "error";
@@ -80,7 +84,8 @@ export default function Discover({
     mcps: string[];
     workflows: string[];
     agents: string[];
-  }>({ skills: [], mcps: [], workflows: [], agents: [] });
+    a2aServices: string[];
+  }>({ skills: [], mcps: [], workflows: [], agents: [], a2aServices: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -108,6 +113,7 @@ export default function Discover({
         mcps: reg.mcps,
         workflows: reg.workflows,
         agents: profiles.map((p) => p.id),
+        a2aServices: reg.a2aServices ?? [],
       });
     } catch {
       /* leave as-is */
@@ -129,6 +135,7 @@ export default function Discover({
           mcps: data.mcps ?? [],
           agents: data.agents ?? [],
           workflows: data.workflows ?? [],
+          a2aServices: data.a2aServices ?? [],
         });
         // `source: name` so the existing install path runs
         // `hermes skills install <name>`.
@@ -186,6 +193,10 @@ export default function Discover({
           return installed.agents.includes(item.id);
         case "workflows":
           return installed.workflows.includes(item.id);
+        case "a2aServices":
+          return installed.a2aServices.includes(item.id);
+        default:
+          return false;
       }
     },
     [installed],

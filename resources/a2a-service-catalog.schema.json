@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes.one/schemas/a2a-service-catalog-entry.json",
+  "title": "Hermes Registry A2A Service Entry",
+  "description": "Cloud Discover catalog entry for type a2a-service (update channel).",
+  "type": "object",
+  "required": ["id", "type", "name", "version", "description"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}$"
+    },
+    "type": { "const": "a2a-service" },
+    "name": { "type": "string", "minLength": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+"
+    },
+    "description": { "type": "string", "minLength": 12 },
+    "category": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "platforms": {
+      "type": "array",
+      "items": { "enum": ["win32", "darwin", "linux"] }
+    },
+    "archiveUrl": {
+      "type": "string",
+      "description": "HTTPS URL to the release zip (no .venv inside)."
+    },
+    "archive_url": { "type": "string" },
+    "archiveSha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$",
+      "description": "Integrity hash for the update channel (content signature)."
+    },
+    "sha256": { "type": "string" },
+    "githubRepo": {
+      "type": "string",
+      "pattern": "^[\\w.-]+/[\\w.-]+$"
+    },
+    "githubRef": { "type": "string" },
+    "githubPath": { "type": "string" },
+    "github": {
+      "type": "object",
+      "properties": {
+        "repo": { "type": "string" },
+        "ref": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    },
+    "localPath": {
+      "type": "string",
+      "description": "Dev-only local path; not used in cloud catalog."
+    }
+  },
+  "anyOf": [
+    { "required": ["archiveUrl"] },
+    { "required": ["archive_url"] },
+    { "required": ["githubRepo"] },
+    { "required": ["github"] },
+    { "required": ["localPath"] }
+  ]
+}

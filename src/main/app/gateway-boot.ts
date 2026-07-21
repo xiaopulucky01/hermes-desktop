@@ -6,6 +6,7 @@
 import {
   ensureA2aConfig,
   ensureA2aEnv,
+  ensureA2aOrchestratorHint,
   ensureA2aPluginLinked,
   isA2aPluginAvailable,
 } from "../a2a-plugin";
@@ -41,6 +42,11 @@ export function bootGatewayAndA2aOnAppStart(): void {
         a2aProvisioningChanged = ensureA2aEnv(profile) || a2aProvisioningChanged;
       } catch (err) {
         console.warn("[boot] A2A env provisioning failed:", err);
+      }
+      try {
+        ensureA2aOrchestratorHint(profile);
+      } catch (err) {
+        console.warn("[boot] A2A orchestrator hint failed:", err);
       }
     }
 

@@ -1,0 +1,4 @@
+{
+  "entries": [],
+  "_comment": "Optional manual overrides only (type a2a-service). Discover auto-scans ../agent-services/agents/<id>/manifest.json. Cloud agents belong in hermes-registry index.json via archiveUrl or githubRepo — not in this file."
+}

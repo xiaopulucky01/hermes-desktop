@@ -1,10 +1,18 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { profileHome, safeWriteFile } from "./utils";
 import { installSkill, listInstalledSkills } from "./skills";
 import { createProfile } from "./profiles";
 import { writeSoul } from "./soul";
 import { listMcpServers } from "./installer";
+import {
+  installAgentServiceFromArchive,
+  installAgentServiceFromGitHub,
+  installAgentServiceFromPath,
+  listInstalledAgentIds,
+  startAgentService,
+} from "./agent-services";
+import { scanLocalA2aAgentCatalog } from "./agent-services/local-catalog";
 import type {
   RegistryKind,
   RegistryItem,
@@ -40,7 +48,7 @@ const TREE_URL = `https://api.github.com/repos/${REGISTRY_REPO}/git/trees/${REGI
 /** index.json entry shape. */
 interface IndexEntry {
   id: string;
-  type: "agent" | "mcp" | "skill" | "workflow";
+  type: "agent" | "mcp" | "skill" | "workflow" | "a2a-service";
   category?: string;
   name: string;
   version?: string;
@@ -50,9 +58,19 @@ interface IndexEntry {
   license?: string;
   platforms?: string[];
   path?: string;
+  archiveUrl?: string;
+  archive_url?: string;
+  archiveSha256?: string;
+  sha256?: string;
+  githubRepo?: string;
+  github?: { repo?: string; ref?: string; path?: string };
+  githubRef?: string;
+  githubPath?: string;
+  localPath?: string;
+  local_path?: string;
 }
 
-/** Per-entry manifest.json (mcp / agent / workflow). */
+/** Per-entry manifest.json (mcp / agent / workflow / a2a-service). */
 interface EntryManifest {
   description?: string;
   // Matches the engine's accepted transports. "sse" must be preserved in the
@@ -77,13 +95,7 @@ const TYPE_TO_KIND: Record<IndexEntry["type"], RegistryKind> = {
   mcp: "mcps",
   agent: "agents",
   workflow: "workflows",
-};
-
-const EMPTY_CATALOG: RegistryCatalog = {
-  skills: [],
-  mcps: [],
-  agents: [],
-  workflows: [],
+  "a2a-service": "a2aServices",
 };
 
 // Short-lived cache so flipping between Discover sub-tabs doesn't refetch.
@@ -100,6 +112,7 @@ function authorName(author: IndexEntry["author"]): string | undefined {
 }
 
 function toItem(e: IndexEntry): RegistryItem {
+  const gh = e.github;
   return {
     id: e.id,
     name: e.name || e.id,
@@ -112,7 +125,73 @@ function toItem(e: IndexEntry): RegistryItem {
     platforms: e.platforms,
     path: e.path,
     homepage: e.path ? `${REGISTRY_REPO_BASE}/${e.path}` : undefined,
+    archiveUrl: e.archiveUrl || e.archive_url,
+    archiveSha256: e.archiveSha256 || e.sha256,
+    githubRepo: e.githubRepo || gh?.repo,
+    githubRef: e.githubRef || gh?.ref || "main",
+    githubPath: e.githubPath || gh?.path,
+    localPath: e.localPath || e.local_path,
   };
+}
+
+function emptyCatalog(): RegistryCatalog {
+  return {
+    skills: [],
+    mcps: [],
+    agents: [],
+    workflows: [],
+    a2aServices: [],
+  };
+}
+
+function mergeCatalog(into: RegistryCatalog, from: RegistryCatalog): void {
+  for (const kind of Object.keys(into) as RegistryKind[]) {
+    const existing = new Set(into[kind].map((i) => i.id));
+    for (const item of from[kind]) {
+      if (!existing.has(item.id)) into[kind].push(item);
+    }
+  }
+}
+
+function loadBundledA2aCatalog(): RegistryCatalog {
+  const data = emptyCatalog();
+  const candidates = [
+    join(__dirname, "../../resources/a2a-services-catalog.json"),
+    join(process.cwd(), "resources/a2a-services-catalog.json"),
+  ];
+  for (const file of candidates) {
+    if (!existsSync(file)) continue;
+    try {
+      const raw = JSON.parse(readFileSync(file, "utf-8")) as {
+        entries?: IndexEntry[];
+      };
+      for (const entry of raw.entries ?? []) {
+        if (entry.type !== "a2a-service" || !entry.id) continue;
+        data.a2aServices.push(toItem(entry));
+      }
+      break;
+    } catch {
+      /* ignore */
+    }
+  }
+  return data;
+}
+
+/** Auto-discover packages under sibling agent-services/agents/ (dev). */
+function loadScannedLocalA2aCatalog(): RegistryCatalog {
+  const data = emptyCatalog();
+  for (const entry of scanLocalA2aAgentCatalog()) {
+    data.a2aServices.push(toItem(entry as IndexEntry));
+  }
+  return data;
+}
+
+/** Bundled optional overrides + filesystem scan of agent-services/agents. */
+function loadDevA2aCatalog(): RegistryCatalog {
+  const data = emptyCatalog();
+  mergeCatalog(data, loadBundledA2aCatalog());
+  mergeCatalog(data, loadScannedLocalA2aCatalog());
+  return data;
 }
 
 /**
@@ -131,24 +210,23 @@ export async function fetchRegistry(
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {
-      return { ...EMPTY_CATALOG, error: `Registry returned ${res.status}` };
+      return {
+        ...loadDevA2aCatalog(),
+        error: `Registry returned ${res.status}`,
+      };
     }
     const raw = (await res.json()) as { entries?: IndexEntry[] };
-    const data: RegistryCatalog = {
-      skills: [],
-      mcps: [],
-      agents: [],
-      workflows: [],
-    };
+    const data: RegistryCatalog = emptyCatalog();
     for (const entry of raw.entries ?? []) {
       const kind = TYPE_TO_KIND[entry.type];
       if (kind && entry.id) data[kind].push(toItem(entry));
     }
+    mergeCatalog(data, loadDevA2aCatalog());
     cache = { at: Date.now(), data };
     return data;
   } catch (err) {
     return {
-      ...EMPTY_CATALOG,
+      ...loadDevA2aCatalog(),
       error: err instanceof Error ? err.message : "Failed to load registry",
     };
   }
@@ -201,6 +279,7 @@ export function listInstalledRegistry(profile?: string): InstalledRegistry {
   let skills: string[] = [];
   let mcps: string[] = [];
   let workflows: string[] = [];
+  let a2aServices: string[] = [];
   try {
     skills = listInstalledSkills(profile).map((s) => s.name);
   } catch {
@@ -222,7 +301,12 @@ export function listInstalledRegistry(profile?: string): InstalledRegistry {
   } catch {
     /* ignore */
   }
-  return { skills, mcps, workflows };
+  try {
+    a2aServices = listInstalledAgentIds();
+  } catch {
+    /* ignore */
+  }
+  return { skills, mcps, workflows, a2aServices };
 }
 
 export interface InstallResult {
@@ -271,6 +355,20 @@ function buildSpec(
   } else if (kind === "agents" && m) {
     if (m.model) rows.push({ label: "Model", value: m.model, mono: true });
     if (m.tools?.length) rows.push({ label: "Tools", chips: m.tools });
+  } else if (kind === "a2aServices") {
+    if (item.localPath) {
+      rows.push({ label: "Local path", value: item.localPath, mono: true });
+    }
+    if (item.archiveUrl) {
+      rows.push({ label: "Archive", value: item.archiveUrl, mono: true });
+    }
+    if (item.githubRepo) {
+      rows.push({
+        label: "GitHub",
+        value: `${item.githubRepo}@${item.githubRef || "main"}${item.githubPath ? `:${item.githubPath}` : ""}`,
+        mono: true,
+      });
+    }
   } else if (kind === "workflows" && m) {
     if (m.entry) rows.push({ label: "Entry", value: m.entry, mono: true });
     if (m.requires?.length) rows.push({ label: "Requires", chips: m.requires });
@@ -303,6 +401,9 @@ export async function fetchRegistryDetail(
   kind: RegistryKind,
   item: RegistryItem,
 ): Promise<RegistryDetail> {
+  if (kind === "a2aServices" && !item.path) {
+    return buildSpec(kind, item, null);
+  }
   if (!item.path) return { description: item.description || "" };
 
   if (kind === "skills") {
@@ -526,6 +627,7 @@ async function installAgent(item: RegistryItem): Promise<InstallResult> {
  *   - agent    → clone a profile named after the agent and set its SOUL.md
  *                from the agent's AGENT.md
  *   - workflow → download the entry folder into <profile>/workflows/<id>/
+ *   - a2aServices → install into %HERMES_HOME%/agent-services/ and start
  */
 export async function installRegistryItem(
   kind: RegistryKind,
@@ -544,6 +646,8 @@ export async function installRegistryItem(
         return await installAgent(item);
       case "workflows":
         return await installWorkflow(item, profile);
+      case "a2aServices":
+        return await installA2aService(item);
       default:
         return { success: false, error: "Unknown item kind" };
     }
@@ -553,4 +657,86 @@ export async function installRegistryItem(
       error: err instanceof Error ? err.message : "Install failed",
     };
   }
+}
+
+/**
+ * Resolve catalog `localPath`. Prefer relative paths in catalog JSON
+ * (e.g. `../agent-services/agents/crewai-agent`); absolute paths are accepted
+ * but discouraged. Relative paths are tried against the desktop app root and cwd.
+ */
+function resolveA2aLocalPath(localPath: string): string {
+  const trimmed = localPath.trim();
+  if (trimmed.match(/^[a-zA-Z]:[\\/]/) || trimmed.startsWith("/")) {
+    return trimmed;
+  }
+  // Bundled catalog paths are relative to hermes-desktop (not HERMES_HOME).
+  const bases = [
+    join(__dirname, "../.."), // out/main → project root (dev / electron-vite)
+    process.cwd(),
+    join(__dirname, "../../.."),
+  ];
+  for (const base of bases) {
+    const candidate = resolve(base, trimmed);
+    if (existsSync(candidate)) return candidate;
+  }
+  return resolve(bases[0] || process.cwd(), trimmed);
+}
+
+/** Install an A2A service from local path, archive URL, GitHub, or registry folder. */
+async function installA2aService(item: RegistryItem): Promise<InstallResult> {
+  // @lat: [[lat.md/agent-services#Agent services#Discover catalog#Install A2A service]]
+  let installed: { success: boolean; error?: string; id?: string };
+
+  if (item.localPath?.trim()) {
+    const catalogPath = item.localPath.trim();
+    const source = resolveA2aLocalPath(catalogPath);
+    if (!existsSync(source)) {
+      return {
+        success: false,
+        error: `Source path not found for catalog localPath "${catalogPath}" (resolved: ${source}). Update resources/a2a-services-catalog.json after moving an agent.`,
+      };
+    }
+    installed = await installAgentServiceFromPath(source, { link: true });
+  } else if (item.archiveUrl?.trim()) {
+    installed = await installAgentServiceFromArchive(item.archiveUrl.trim(), {
+      expectedId: item.id,
+      expectedSha256: item.archiveSha256,
+    });
+  } else if (item.githubRepo?.trim()) {
+    installed = await installAgentServiceFromGitHub(
+      item.githubRepo.trim(),
+      item.githubRef || "main",
+      item.githubPath,
+      item.id,
+    );
+  } else if (item.path?.trim()) {
+    const { HERMES_HOME } = await import("./installer");
+    const dest = join(
+      HERMES_HOME,
+      "agent-services",
+      "cache",
+      `registry-${item.id}`,
+    );
+    const downloaded = await downloadFolder(item.path, dest);
+    if (!downloaded.success) return downloaded;
+    installed = await installAgentServiceFromPath(dest);
+  } else {
+    return {
+      success: false,
+      error: "A2A service entry has no localPath, archiveUrl, githubRepo, or path",
+    };
+  }
+
+  if (!installed.success || !installed.id) {
+    return { success: false, error: installed.error || "Install failed" };
+  }
+
+  const started = await startAgentService(installed.id);
+  if (!started.success) {
+    return {
+      success: false,
+      error: `Installed but start failed: ${started.error}`,
+    };
+  }
+  return { success: true };
 }

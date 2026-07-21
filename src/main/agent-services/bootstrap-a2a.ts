@@ -25,6 +25,8 @@ interface RegistryEntry {
   skills: unknown[];
   streaming: boolean;
   auth_required: boolean;
+  /** Hermes Desktop agent-services catalog id when known. */
+  service_id?: string;
   discovered_at: number;
   updated_at: number;
 }
@@ -138,6 +140,7 @@ export function upsertA2aRegistryEntry(
   endpoint: string,
   card: AgentCard,
   cardUrl: string,
+  serviceId?: string,
 ): RegistryEntry {
   // @lat: [[lat.md/agent-services#Agent services#A2A bootstrap#Registry upsert]]
   const key = registryKey(endpoint, card);
@@ -155,6 +158,7 @@ export function upsertA2aRegistryEntry(
     skills: card.skills || [],
     streaming: Boolean(caps.streaming),
     auth_required: Boolean(card.security || card.securitySchemes),
+    service_id: serviceId || prev?.service_id,
     discovered_at: prev?.discovered_at ?? now,
     updated_at: now,
   };
@@ -163,11 +167,33 @@ export function upsertA2aRegistryEntry(
   return entry;
 }
 
+export function listA2aRegistryExperts(): Array<{
+  key: string;
+  name: string;
+  description: string;
+  endpoint: string;
+  service_id?: string;
+  skills: unknown[];
+  streaming: boolean;
+}> {
+  const data = loadRegistry();
+  return Object.values(data.agents).map((a) => ({
+    key: a.key,
+    name: a.name,
+    description: a.description,
+    endpoint: a.endpoint,
+    service_id: a.service_id,
+    skills: a.skills,
+    streaming: a.streaming,
+  }));
+}
+
 export async function bootstrapAgentServiceA2a(options: {
   baseUrl: string;
   cardPaths?: string[];
   authToken?: string;
   authTokenEnv?: string;
+  serviceId?: string;
 }): Promise<{ cardUrl: string; registryKey: string; tokenEnv?: string }> {
   const cardPaths = options.cardPaths ?? [
     "/.well-known/agent.json",
@@ -197,7 +223,12 @@ export async function bootstrapAgentServiceA2a(options: {
     ensureAgentServiceAuthToken(host, tokenEnv, token);
   }
 
-  const entry = upsertA2aRegistryEntry(options.baseUrl, card, cardUrl);
+  const entry = upsertA2aRegistryEntry(
+    options.baseUrl,
+    card,
+    cardUrl,
+    options.serviceId,
+  );
   return { cardUrl, registryKey: entry.key, tokenEnv: token ? tokenEnv : undefined };
 }
 

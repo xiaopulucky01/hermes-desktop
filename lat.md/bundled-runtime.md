@@ -27,3 +27,11 @@ The `image_gen/relay` and `video_gen/relay` plugins delegate generation to an up
 ## Windows subprocess patches
 
 `scripts/bundled-python/sitecustomize.py` is installed into site-packages so child processes spawned on Windows default to `CREATE_NO_WINDOW`, avoiding console flashes from the desktop bundle.
+
+## Git Bash lookup patch
+
+`scripts/patch-bundled-python.mjs` patches upstream `tools/environments/local.py` `_find_bash` so the candidates list includes `HERMES_HOME/git` and `%LOCALAPPDATA%\\AI-Compartner\\git` before the stock `hermes\\git` / system Git paths.
+
+## Gateway home-channel patch
+
+The same script rewrites the gateway `run.py` home-channel block: keep upstream secret/config `home_env` resolution, auto-`/sethome` for weixin/wecom/dingtalk/feishu, and show a Chinese notice on first turn when still unset.

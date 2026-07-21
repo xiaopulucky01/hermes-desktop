@@ -107,12 +107,46 @@ const GATEWAY_HOME_CHANNEL_PATCH_MARKER = "# desktop: auto-sethome + zh notice v
 const LOCAL_FIND_BASH_PATCH_MARKER = "# desktop: HERMES_HOME git bash lookup";
 
 function gatewayHomeChannelPatchedBlock() {
+  // Outer `if` drops `not history` so CN auto-sethome can run on later turns;
+  // the Chinese notice stays gated on `not history and not home_env`.
   return `        # One-time prompt if no home channel is set for this platform
         # Skip for webhooks - they deliver directly to configured targets (github_comment, etc.)
         ${GATEWAY_HOME_CHANNEL_PATCH_MARKER}
         if source.platform and source.platform != Platform.LOCAL and source.platform != Platform.WEBHOOK:
             platform_name = source.platform.value
             env_key = _home_target_env_var(platform_name)
+            # Multiplex: home channel may live only in the profile secret
+            # scope / PlatformConfig, not process os.environ.
+            home_env = ""
+            try:
+                from agent.secret_scope import get_secret
+
+                home_env = (get_secret(env_key) or "").strip() if env_key else ""
+            except Exception:
+                home_env = ""
+            if not home_env:
+                home_env = (os.getenv(env_key) or "").strip() if env_key else ""
+            # Also honor in-memory / yaml home_channel on this platform.
+            try:
+                if not home_env and self.config.get_home_channel(source.platform):
+                    home_env = "set"
+            except Exception:
+                pass
+            # Secondary-profile platforms (e.g. Slack on yolo) may only exist
+            # under that profile's loaded config — check after scope install.
+            if not home_env:
+                try:
+                    from hermes_cli.profiles import get_profile_dir
+                    from gateway.config import load_gateway_config as _lgc
+                    prof = (getattr(source, "profile", None) or "").strip()
+                    if prof and prof != "default":
+                        # Already inside profile scope for secondary handlers;
+                        # re-read live config for home_channel.
+                        _pcfg = _lgc()
+                        if _pcfg.get_home_channel(source.platform):
+                            home_env = "set"
+                except Exception:
+                    pass
             _DESKTOP_AUTO_SETHOME = frozenset({"weixin", "wecom", "dingtalk", "feishu"})
             _DESKTOP_PLATFORM_LABELS = {
                 "weixin": "微信",
@@ -120,7 +154,7 @@ function gatewayHomeChannelPatchedBlock() {
                 "dingtalk": "钉钉",
                 "feishu": "飞书",
             }
-            if not os.getenv(env_key) and platform_name in _DESKTOP_AUTO_SETHOME:
+            if not home_env and platform_name in _DESKTOP_AUTO_SETHOME:
                 try:
                     from hermes_cli.config import save_env_value
 
@@ -141,6 +175,7 @@ function gatewayHomeChannelPatchedBlock() {
                         name=chat_name,
                         thread_id=str(source.thread_id) if source.thread_id else None,
                     )
+                    home_env = str(chat_id)
                     logger.info(
                         "Auto-sethome: designated %s (%s) as %s home channel",
                         chat_id,
@@ -151,7 +186,7 @@ function gatewayHomeChannelPatchedBlock() {
                     logger.warning(
                         "Auto-sethome failed for %s: %s", platform_name, e,
                     )
-            if not history and not os.getenv(env_key):
+            if not history and not home_env:
                 # Slack dispatches all Hermes commands through a single
                 # parent slash command \`/hermes\`; bare \`/sethome\` is not
                 # registered and would fail with "app did not respond".
@@ -182,14 +217,16 @@ function patchLocalFindBash() {
     return;
   }
 
+  // Upstream _find_bash builds a candidates list, then probes which bash
+  // actually starts. Desktop inserts HERMES_HOME git paths into that list.
   const needle = `    custom = os.environ.get("HERMES_GIT_BASH_PATH")
     if custom and os.path.isfile(custom):
-        return custom
+        candidates.append(custom)
 
-    # Prefer our own portable Git install first`;
+    # Prefer our own portable Git install — a broken or partially-uninstalled`;
   const replacement = `    custom = os.environ.get("HERMES_GIT_BASH_PATH")
     if custom and os.path.isfile(custom):
-        return custom
+        candidates.append(custom)
 
     ${LOCAL_FIND_BASH_PATCH_MARKER}
     _hermes_home = os.environ.get("HERMES_HOME", "")
@@ -198,10 +235,10 @@ function patchLocalFindBash() {
             os.path.join(_hermes_home, "git", "bin", "bash.exe"),
             os.path.join(_hermes_home, "git", "usr", "bin", "bash.exe"),
         ):
-            if os.path.isfile(candidate):
-                return candidate
+            if os.path.isfile(candidate) and candidate not in candidates:
+                candidates.append(candidate)
 
-    # Prefer our own portable Git install first`;
+    # Prefer our own portable Git install — a broken or partially-uninstalled`;
 
   if (!content.includes(needle)) {
     throw new Error(
@@ -210,29 +247,28 @@ function patchLocalFindBash() {
   }
   content = content.replace(needle, replacement);
 
-  const legacyNeedle = `_hermes_portable_git = os.path.join(_local_appdata, "hermes", "git") if _local_appdata else ""`;
+  // Also search %LOCALAPPDATA%\\AI-Compartner\\git (desktop default home).
+  const legacyNeedle = `_hermes_portable_git = os.path.join(_local_appdata, "hermes", "git") if _local_appdata else ""
+    if _hermes_portable_git:
+        for candidate in (
+            os.path.join(_hermes_portable_git, "bin", "bash.exe"),        # PortableGit (primary)
+            os.path.join(_hermes_portable_git, "usr", "bin", "bash.exe"), # MinGit fallback
+        ):
+            if os.path.isfile(candidate) and candidate not in candidates:
+                candidates.append(candidate)`;
   const legacyReplacement = `_hermes_portable_git_dirs = []
     if _local_appdata:
         for _subdir in ("AI-Compartner", "hermes"):
-            _hermes_portable_git_dirs.append(os.path.join(_local_appdata, _subdir, "git"))`;
+            _hermes_portable_git_dirs.append(os.path.join(_local_appdata, _subdir, "git"))
+    for _hermes_portable_git in _hermes_portable_git_dirs:
+        for candidate in (
+            os.path.join(_hermes_portable_git, "bin", "bash.exe"),        # PortableGit (primary)
+            os.path.join(_hermes_portable_git, "usr", "bin", "bash.exe"), # MinGit fallback
+        ):
+            if os.path.isfile(candidate) and candidate not in candidates:
+                candidates.append(candidate)`;
   if (content.includes(legacyNeedle)) {
     content = content.replace(legacyNeedle, legacyReplacement);
-    content = content.replace(
-      `    if _hermes_portable_git:
-        for candidate in (
-            os.path.join(_hermes_portable_git, "bin", "bash.exe"),        # PortableGit (primary)
-            os.path.join(_hermes_portable_git, "usr", "bin", "bash.exe"), # MinGit fallback
-        ):
-            if os.path.isfile(candidate):
-                return candidate`,
-      `    for _hermes_portable_git in _hermes_portable_git_dirs:
-        for candidate in (
-            os.path.join(_hermes_portable_git, "bin", "bash.exe"),        # PortableGit (primary)
-            os.path.join(_hermes_portable_git, "usr", "bin", "bash.exe"), # MinGit fallback
-        ):
-            if os.path.isfile(candidate):
-                return candidate`,
-    );
   }
 
   writeFileSync(localPath, content, "utf8");
@@ -257,7 +293,39 @@ function patchGatewayHomeChannelNotice() {
         if not history and source.platform and source.platform != Platform.LOCAL and source.platform != Platform.WEBHOOK:
             platform_name = source.platform.value
             env_key = _home_target_env_var(platform_name)
-            if not os.getenv(env_key):
+            # Multiplex: home channel may live only in the profile secret
+            # scope / PlatformConfig, not process os.environ.
+            home_env = ""
+            try:
+                from agent.secret_scope import get_secret
+
+                home_env = (get_secret(env_key) or "").strip() if env_key else ""
+            except Exception:
+                home_env = ""
+            if not home_env:
+                home_env = (os.getenv(env_key) or "").strip() if env_key else ""
+            # Also honor in-memory / yaml home_channel on this platform.
+            try:
+                if not home_env and self.config.get_home_channel(source.platform):
+                    home_env = "set"
+            except Exception:
+                pass
+            # Secondary-profile platforms (e.g. Slack on yolo) may only exist
+            # under that profile's loaded config — check after scope install.
+            if not home_env:
+                try:
+                    from hermes_cli.profiles import get_profile_dir
+                    from gateway.config import load_gateway_config as _lgc
+                    prof = (getattr(source, "profile", None) or "").strip()
+                    if prof and prof != "default":
+                        # Already inside profile scope for secondary handlers;
+                        # re-read live config for home_channel.
+                        _pcfg = _lgc()
+                        if _pcfg.get_home_channel(source.platform):
+                            home_env = "set"
+                except Exception:
+                    pass
+            if not home_env:
                 # Slack dispatches all Hermes commands through a single
                 # parent slash command \`/hermes\`; bare \`/sethome\` is not
                 # registered and would fail with "app did not respond".

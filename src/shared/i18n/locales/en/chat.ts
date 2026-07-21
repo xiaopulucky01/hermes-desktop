@@ -99,6 +99,9 @@ export default {
   categoryAgent: "Agent",
   categoryTools: "Tools",
   categoryInfo: "Info",
+  expertsLabel: "Available experts",
+  expertsPreferHint:
+    "[Prefer A2A expert: {{name}} ({{endpoint}})]\n",
   noUsageData: "No usage data yet. Send a message first.",
   media: {
     open: "Open",

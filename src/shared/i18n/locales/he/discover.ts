@@ -7,6 +7,7 @@ export default {
     mcps: "שרתי MCP",
     agents: "סוכנים",
     workflows: "תהליכי עבודה",
+    a2aServices: "שירותי A2A",
   },
   searchPlaceholder: "חיפוש {{kind}}...",
   refresh: "רענון",

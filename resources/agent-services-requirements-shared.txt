@@ -1,0 +1,4 @@
+# Shared baseline deps for multi-agent shared-venv (not Hermes resources/python).
+# Individual agents add their own deps via `pip install -e agents/<id>`.
+uvicorn[standard]>=0.30.0
+a2a-sdk>=0.2.0

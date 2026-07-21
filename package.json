@@ -32,6 +32,9 @@
     "build:rpm": "npm run build && electron-builder --linux rpm",
     "prepare-runtime": "node scripts/prepare-runtime.mjs",
     "stage-hermes-a2a": "node scripts/stage-hermes-a2a.mjs",
+    "agent:new": "node scripts/hermes-agent-new.cjs",
+    "agent:validate": "node scripts/validate-a2a-agent.cjs",
+    "agent:pack": "node scripts/pack-a2a-agent.cjs",
     "test:watch": "vitest"
   },
   "dependencies": {

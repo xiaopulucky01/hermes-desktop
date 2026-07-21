@@ -890,6 +890,7 @@ interface HermesAPI {
       id: string;
       name: string;
       version: string;
+      description?: string;
       enabled: boolean;
       status: "stopped" | "starting" | "running" | "error";
       port?: number;
@@ -897,6 +898,13 @@ interface HermesAPI {
       card_url?: string;
       last_error?: string | null;
       link_path?: string;
+      has_venv?: boolean;
+      ui?: {
+        type?: "none" | "webview" | "static";
+        url?: string;
+        path?: string;
+        title?: string;
+      };
     }>
   >;
   installAgentServiceFromPath: (
@@ -926,6 +934,73 @@ interface HermesAPI {
     card_url?: string;
   }>;
   stopAgentService: (id: string) => Promise<{ success: boolean; error?: string }>;
+  getAgentServiceUiUrl: (id: string) => Promise<{
+    success: boolean;
+    url?: string;
+    title?: string;
+    error?: string;
+  }>;
+  openAgentServiceUi: (id: string) => Promise<{
+    success: boolean;
+    url?: string;
+    title?: string;
+    error?: string;
+  }>;
+  listA2aExperts: () => Promise<
+    Array<{
+      key: string;
+      name: string;
+      description: string;
+      endpoint: string;
+      service_id?: string;
+      skills: unknown[];
+      streaming: boolean;
+    }>
+  >;
+  ensureAgentServiceRunning: (id: string) => Promise<{
+    success: boolean;
+    error?: string;
+    port?: number;
+    base_url?: string;
+    card_url?: string;
+  }>;
+  ensureAgentServiceRunningByEndpoint: (
+    endpointOrServiceId: string,
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    id?: string;
+    port?: number;
+    base_url?: string;
+    card_url?: string;
+  }>;
+  setAgentServiceEnabled: (
+    id: string,
+    enabled: boolean,
+  ) => Promise<{ success: boolean; error?: string }>;
+  scaffoldAgentService: (opts: {
+    id: string;
+    name?: string;
+    description?: string;
+    destDir?: string;
+    templateDir?: string;
+  }) => Promise<{ success: boolean; path?: string; error?: string }>;
+  listAgentServiceUpdates: () => Promise<
+    Array<{
+      id: string;
+      currentVersion: string | null;
+      availableVersion: string | null;
+      updateAvailable: boolean;
+      archiveUrl?: string;
+      archiveSha256?: string;
+    }>
+  >;
+  applyAgentServiceUpdate: (id: string) => Promise<{
+    success: boolean;
+    error?: string;
+    port?: number;
+    base_url?: string;
+  }>;
 
   // Updates
   checkForUpdates: () => Promise<string | null>;
@@ -1207,7 +1282,12 @@ interface HermesAPI {
   fetchModelRegistry: (force?: boolean) => Promise<ModelRegistry>;
   listInstalledRegistry: (
     profile?: string,
-  ) => Promise<{ skills: string[]; mcps: string[]; workflows: string[] }>;
+  ) => Promise<{
+    skills: string[];
+    mcps: string[];
+    workflows: string[];
+    a2aServices: string[];
+  }>;
   fetchRegistryDetail: (
     kind: RegistryKind,
     item: RegistryItem,

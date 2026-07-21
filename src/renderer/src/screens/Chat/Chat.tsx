@@ -10,6 +10,10 @@ import { ContextFolderChip } from "./ContextFolderChip";
 import { WorktreePanel } from "./WorktreePanel";
 import { RemoteFolderPicker } from "./RemoteFolderPicker";
 import { WebPreviewPanel } from "./WebPreviewPanel";
+import {
+  AvailableExpertsBar,
+  type A2aExpert,
+} from "./AvailableExpertsBar";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useChatIPC } from "./hooks/useChatIPC";
 import { useChatActions, parseBackgroundCommand } from "./hooks/useChatActions";
@@ -266,6 +270,9 @@ function Chat({
   const chatInputRef = useRef<ChatInputHandle>(null);
   const queueRef = useRef<QueuedMessage[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const [preferredExpert, setPreferredExpert] = useState<A2aExpert | null>(
+    null,
+  );
   const activeTurnRef = useRef<ActiveTurn | null>(null);
   const dashboardChatEnabled = dashboardChatEnabledForConnection(
     import.meta.env.VITE_HERMES_DESKTOP_DASHBOARD_CHAT,
@@ -783,14 +790,27 @@ function Chat({
         void handleSendRef.current(text, attachments, true);
         return;
       }
+
+      let payload = text;
+      if (preferredExpert) {
+        const target =
+          preferredExpert.service_id || preferredExpert.endpoint;
+        void window.hermesAPI.ensureAgentServiceRunningByEndpoint(target);
+        payload =
+          t("chat.expertsPreferHint", {
+            name: preferredExpert.name,
+            endpoint: preferredExpert.endpoint,
+          }) + text;
+      }
+
       if (isLoading) {
-        queueRef.current.push({ text, attachments });
+        queueRef.current.push({ text: payload, attachments });
         setQueuedMessages([...queueRef.current]);
         return;
       }
-      void handleSendRef.current(text, attachments);
+      void handleSendRef.current(payload, attachments);
     },
-    [isLoading],
+    [isLoading, preferredExpert, t],
   );
 
   const handleSuggestion = useCallback((text: string) => {
@@ -1038,6 +1058,14 @@ function Chat({
         <QueuedMessages
           messages={queuedMessages}
           onRemove={handleRemoveQueued}
+        />
+        <AvailableExpertsBar
+          preferredKey={preferredExpert?.key ?? null}
+          onPreferExpert={(expert) =>
+            setPreferredExpert((prev) =>
+              prev?.key === expert.key ? null : expert,
+            )
+          }
         />
         <ChatInput
           ref={chatInputRef}

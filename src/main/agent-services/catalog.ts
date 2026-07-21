@@ -21,6 +21,7 @@ import type {
   AgentServiceState,
   AgentServiceStatus,
 } from "./types";
+import { hasRuntimeVenv } from "./python-runtime";
 
 function agentServicesRootEnsure(): void {
   mkdirSync(agentServicesInstalledRoot(), { recursive: true });
@@ -141,10 +142,15 @@ export function listAgentServiceStatuses(): AgentServiceStatus[] {
     if (!manifest) continue;
     const state = readState(id);
     const cat = byId.get(id);
+    const workDir =
+      state.link_path && existsSync(state.link_path)
+        ? state.link_path
+        : agentServiceInstalledDir(id);
     out.push({
       id,
       name: manifest.name,
       version: manifest.version,
+      description: manifest.description,
       enabled: cat?.enabled ?? true,
       status: state.status,
       port: state.port ?? cat?.port,
@@ -152,6 +158,8 @@ export function listAgentServiceStatuses(): AgentServiceStatus[] {
       card_url: state.card_url,
       last_error: state.last_error ?? null,
       link_path: state.link_path,
+      ui: manifest.ui,
+      has_venv: hasRuntimeVenv(workDir, manifest),
     });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
