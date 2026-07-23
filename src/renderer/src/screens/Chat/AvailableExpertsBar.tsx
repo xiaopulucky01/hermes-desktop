@@ -10,6 +10,9 @@ interface AvailableExpertsBarProps {
   /** When set, prepend a preference hint into the composer. */
   onPreferExpert?: (expert: A2aExpert) => void;
   preferredKey?: string | null;
+  /** Endpoint / peer substring currently collaborating (live A2A). */
+  busyEndpoint?: string | null;
+  busyPeer?: string | null;
 }
 
 /**
@@ -19,6 +22,8 @@ interface AvailableExpertsBarProps {
 export function AvailableExpertsBar({
   onPreferExpert,
   preferredKey,
+  busyEndpoint = null,
+  busyPeer = null,
 }: AvailableExpertsBarProps): React.JSX.Element | null {
   const { t } = useI18n();
   const [experts, setExperts] = useState<A2aExpert[]>([]);
@@ -40,6 +45,18 @@ export function AvailableExpertsBar({
 
   if (experts.length === 0) return null;
 
+  const preferred = preferredKey
+    ? experts.find((e) => e.key === preferredKey)
+    : undefined;
+
+  function isBusy(expert: A2aExpert): boolean {
+    if (!busyEndpoint && !busyPeer) return false;
+    const hay = `${expert.endpoint} ${expert.name} ${expert.key} ${expert.service_id || ""}`.toLowerCase();
+    if (busyEndpoint && hay.includes(busyEndpoint.toLowerCase())) return true;
+    if (busyPeer && hay.includes(busyPeer.toLowerCase())) return true;
+    return false;
+  }
+
   async function handleClick(expert: A2aExpert): Promise<void> {
     const target = expert.service_id || expert.endpoint;
     try {
@@ -59,20 +76,33 @@ export function AvailableExpertsBar({
       <div className="chat-experts-chips">
         {experts.map((expert) => {
           const active = preferredKey === expert.key;
+          const busy = isBusy(expert);
           return (
             <button
               key={expert.key}
               type="button"
               role="listitem"
-              className={`chat-experts-chip${active ? " is-active" : ""}`}
-              title={expert.description || expert.endpoint}
+              className={`chat-experts-chip${active ? " is-active" : ""}${busy ? " is-busy" : ""}`}
+              title={
+                busy
+                  ? t("chat.expertsBusyTitle", { name: expert.name })
+                  : expert.description || expert.endpoint
+              }
               onClick={() => void handleClick(expert)}
             >
               {expert.name}
+              {busy ? (
+                <span className="chat-experts-busy-dot" aria-hidden />
+              ) : null}
             </button>
           );
         })}
       </div>
+      {preferred && (
+        <p className="chat-experts-prefer-hint">
+          {t("chat.expertsPreferActive", { name: preferred.name })}
+        </p>
+      )}
     </div>
   );
 }

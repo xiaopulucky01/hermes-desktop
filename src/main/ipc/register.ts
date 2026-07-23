@@ -164,6 +164,7 @@ import {
   installAndStartAgentServiceFromPath,
   listAgentServiceStatuses,
   listA2aRegistryExperts,
+  readA2aLiveProgress,
   openAgentServiceUi,
   ensureAgentServiceRunning,
   ensureAgentServiceRunningByEndpoint,
@@ -2660,6 +2661,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     openAgentServiceUi(id),
   );
   ipcMain.handle("agent-services-list-experts", () => listA2aRegistryExperts());
+  ipcMain.handle("a2a-live-progress", () => readA2aLiveProgress());
   ipcMain.handle("agent-services-ensure-running", (_event, id: string) =>
     ensureAgentServiceRunning(id),
   );

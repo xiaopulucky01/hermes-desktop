@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Code2, Copy, Download, ExternalLink, Loader } from "lucide-react";
+import {
+  Check,
+  Code2,
+  Copy,
+  Download,
+  ExternalLink,
+  Loader,
+  RefreshCw,
+} from "lucide-react";
 import type { AcpLaunchInfo } from "../../../../shared/acp";
 import { useI18n } from "../useI18n";
 
@@ -95,23 +103,28 @@ export default function IdeIntegrationPane(): React.JSX.Element {
             <span className="skeleton skeleton-md" />
           ) : info?.available ? (
             <>
-              <p className="settings-field-hint">{t("settings.acp.readyHint")}</p>
+              <p className="settings-ide-hint">{t("settings.acp.readyHint")}</p>
 
-              <CopyBlock
-                label={t("settings.acp.launcherPath")}
-                value={info.launcherPath ?? ""}
-                copied={copiedKey === "launcher"}
-                onCopy={() => void copyText("launcher", info.launcherPath ?? "")}
-              />
-
-              {info.zedAgentJson && (
+              <div className="settings-snippet-stack">
                 <CopyBlock
-                  label={t("settings.acp.zedConfig")}
-                  value={info.zedAgentJson}
-                  copied={copiedKey === "zed"}
-                  onCopy={() => void copyText("zed", info.zedAgentJson ?? "")}
+                  label={t("settings.acp.launcherPath")}
+                  value={info.launcherPath ?? ""}
+                  copied={copiedKey === "launcher"}
+                  onCopy={() =>
+                    void copyText("launcher", info.launcherPath ?? "")
+                  }
                 />
-              )}
+
+                {info.zedAgentJson && (
+                  <CopyBlock
+                    label={t("settings.acp.zedConfig")}
+                    value={info.zedAgentJson}
+                    copied={copiedKey === "zed"}
+                    multiline
+                    onCopy={() => void copyText("zed", info.zedAgentJson ?? "")}
+                  />
+                )}
+              </div>
 
               <div className="settings-card-actions">
                 <button
@@ -119,6 +132,7 @@ export default function IdeIntegrationPane(): React.JSX.Element {
                   className="btn btn-secondary"
                   onClick={() => void refresh()}
                 >
+                  <RefreshCw size={14} />
                   {t("settings.acp.refreshLauncher")}
                 </button>
                 <button
@@ -163,7 +177,9 @@ export default function IdeIntegrationPane(): React.JSX.Element {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => void window.hermesAPI.openExternal(ACP_DOCS_URL)}
+                  onClick={() =>
+                    void window.hermesAPI.openExternal(ACP_DOCS_URL)
+                  }
                 >
                   <ExternalLink size={14} />
                   {t("settings.acp.openDocs")}
@@ -189,24 +205,34 @@ function CopyBlock({
   value,
   copied,
   onCopy,
+  multiline = false,
 }: {
   label: string;
   value: string;
   copied: boolean;
   onCopy: () => void;
+  multiline?: boolean;
 }): React.JSX.Element {
   const { t } = useI18n();
 
   return (
-    <div className="settings-meta-path">
-      <div className="settings-card-actions" style={{ marginBottom: "0.35rem" }}>
+    <div
+      className={`settings-snippet${multiline ? " is-multiline" : ""}${copied ? " is-copied" : ""}`}
+    >
+      <div className="settings-snippet-head">
         <span className="settings-meta-label">{label}</span>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onCopy}>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm settings-snippet-copy"
+          onClick={onCopy}
+        >
           {copied ? <Check size={14} /> : <Copy size={14} />}
           {copied ? t("settings.acp.copied") : t("settings.acp.copy")}
         </button>
       </div>
-      <code className="settings-meta-pathvalue">{value}</code>
+      <pre className="settings-snippet-code">
+        <code>{value}</code>
+      </pre>
     </div>
   );
 }

@@ -105,8 +105,14 @@ export default {
   categoryTools: "Tools",
   categoryInfo: "Info",
   expertsLabel: "Available experts",
+  expertsPreferActive:
+    "Preferred: {{name}} — next send asks Hermes to call a2a_delegate. Expand the tool row after the reply to confirm.",
+  expertsDelegatedBadge: "Used expert · {{peer}}",
+  expertsCollaboratingBadge: "Collaborating · {{peer}}",
+  expertsDelegatedPeerFallback: "A2A peer",
+  expertsBusyTitle: "{{name}} is working on this turn",
   expertsPreferHint:
-    "[Prefer A2A expert: {{name}} ({{endpoint}})]\n",
+    "[Prefer A2A expert: {{name}} ({{endpoint}})]. You MUST call a2a_delegate to this endpoint before answering. Do not invent that the expert is offline/not running or missing an LLM API key unless the tool result explicitly says so after a real attempt. If skills are a poor match, say so after attempting delegate (or explain the mismatch), then help the user yourself.\n",
   noUsageData: "No usage data yet. Send a message first.",
   media: {
     open: "Open",

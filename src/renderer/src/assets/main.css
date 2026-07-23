@@ -5008,6 +5008,73 @@ body:has(.shell-vibrant),
   background: color-mix(in srgb, var(--accent, #6b8cae) 18%, transparent);
 }
 
+.chat-experts-chip.is-busy {
+  border-color: color-mix(in srgb, var(--accent, #6b8cae) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #6b8cae) 25%, transparent);
+}
+
+.chat-experts-busy-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 0.35rem;
+  border-radius: 50%;
+  background: var(--accent, #6b8cae);
+  animation: chat-experts-pulse 1.2s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes chat-experts-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.chat-experts-prefer-hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.72rem;
+  opacity: 0.75;
+  line-height: 1.35;
+}
+
+.chat-tool-group--a2a {
+  outline: 1px solid color-mix(in srgb, var(--accent, #6b8cae) 35%, transparent);
+  border-radius: 8px;
+  padding: 0.2rem 0.35rem 0.15rem;
+}
+
+.chat-a2a-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent, #6b8cae);
+  margin: 0.1rem 0 0.25rem 0.15rem;
+}
+
+.chat-a2a-live-stage {
+  font-size: 0.72rem;
+  opacity: 0.85;
+  margin: 0 0.15rem 0.3rem;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-a2a-stages {
+  margin: 0 0 0.5rem;
+  padding: 0.35rem 0.75rem;
+  list-style: decimal;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  opacity: 0.9;
+  border-left: 2px solid color-mix(in srgb, var(--accent, #6b8cae) 45%, transparent);
+}
+
 .chat-input-wrapper {
   display: flex;
   flex-direction: column;
@@ -10426,8 +10493,8 @@ body:has(.shell-vibrant),
 }
 
 .settings-card-badge.is-ok {
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--success);
+  background: var(--success-bg);
 }
 
 .settings-card-badge.is-update {
@@ -10489,6 +10556,95 @@ body:has(.shell-vibrant),
   font-size: 12px;
   color: var(--text-secondary);
   word-break: break-all;
+}
+
+/* IDE Integration — copyable launcher / config snippets. */
+.settings-ide-hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--accent, #4c8dff) 55%, transparent);
+}
+
+.settings-snippet-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-snippet {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-primary, #fff) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);
+  overflow: hidden;
+  transition: border-color var(--transition, 0.15s ease);
+}
+
+.settings-snippet.is-copied {
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+}
+
+.settings-snippet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px 6px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.settings-snippet-copy {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-snippet-copy:hover {
+  color: var(--text-primary);
+}
+
+.settings-snippet.is-copied .settings-snippet-copy {
+  color: var(--success);
+}
+
+.settings-snippet-code {
+  margin: 0;
+  padding: 10px 12px 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+  max-height: none;
+  background: color-mix(in srgb, var(--text-primary) 3.5%, transparent);
+}
+
+.settings-snippet.is-multiline .settings-snippet-code {
+  white-space: pre;
+  word-break: normal;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.settings-snippet-code code {
+  font: inherit;
+  color: inherit;
+  background: none;
+  padding: 0;
 }
 
 .settings-card-actions {

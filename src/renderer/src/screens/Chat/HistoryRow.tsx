@@ -3,7 +3,7 @@ import { Grid } from "react-loader-spinner";
 import { Brain, ChevronRight, Wrench } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 import { AttachmentChip } from "../../components/AttachmentChip";
-import { ToolGlyph, humanizeToolName } from "../../components/toolMeta";
+import { ToolGlyph, humanizeToolName, isA2aDelegateTool, extractA2aPeerHint, extractA2aProgressLines, extractA2aLastProgressLine } from "../../components/toolMeta";
 import { HermesAvatar, AvatarSpacer } from "./MessageRow";
 import type { AgentAvatarInfo } from "./MessageRow";
 import type {
@@ -122,7 +122,13 @@ function isToolCall(msg: ToolItem): msg is ToolCallMessage {
 }
 
 export function toolActivityGroupTitle(items: ToolItem[]): string {
-  const toolCallCount = items.filter(isToolCall).length;
+  const calls = items.filter(isToolCall);
+  const delegate = calls.find((c) => isA2aDelegateTool(c.name));
+  if (delegate) {
+    const peer = extractA2aPeerHint(delegate.args);
+    return peer ? `A2A → ${peer}` : "A2A Delegate";
+  }
+  const toolCallCount = calls.length;
   if (toolCallCount > 1) return `${toolCallCount} tools called`;
   const name = items[items.length - 1]?.name;
   return name ? humanizeToolName(name) : "Tool";
@@ -171,6 +177,10 @@ export function orderToolActivityItems(items: ToolItem[]): ToolItem[] {
 }
 
 function resultMeta(msg: ToolResultMessage): string {
+  if (isA2aDelegateTool(msg.name)) {
+    const last = extractA2aLastProgressLine(msg.content);
+    if (last) return last.length > 90 ? `${last.slice(0, 87)}…` : last;
+  }
   const lines = countLines(msg.content);
   const base = `${lines} ${lines === 1 ? "line" : "lines"}`;
   const n = msg.attachments?.length ?? 0;
@@ -180,6 +190,12 @@ function resultMeta(msg: ToolResultMessage): string {
 function itemDetail(msg: ToolItem): string {
   return isToolCall(msg) ? summariseArgs(msg.args) : resultMeta(msg);
 }
+
+export type A2aLiveProgress = {
+  peer: string;
+  line: string;
+  endpoint?: string;
+};
 
 const ToolActivityItem = memo(function ToolActivityItem({
   msg,
@@ -191,6 +207,10 @@ const ToolActivityItem = memo(function ToolActivityItem({
   const failed = call && msg.status === "failed";
   const hasAttachments =
     !call && !!msg.attachments && msg.attachments.length > 0;
+  const progressLines =
+    !call && isA2aDelegateTool(msg.name)
+      ? extractA2aProgressLines(msg.content)
+      : [];
 
   return (
     <div className="chat-tool-item">
@@ -223,6 +243,13 @@ const ToolActivityItem = memo(function ToolActivityItem({
       >
         <div className="chat-tool-collapse-inner">
           <div className="chat-tool-item-body">
+            {progressLines.length > 0 && (
+              <ol className="chat-a2a-stages" aria-label="A2A progress">
+                {progressLines.map((line, i) => (
+                  <li key={`${i}-${line.slice(0, 24)}`}>{line}</li>
+                ))}
+              </ol>
+            )}
             {hasAttachments && (
               <div className="chat-history-attachments">
                 {msg.attachments!.map((att: Attachment) => (
@@ -249,6 +276,7 @@ export const ToolActivityGroup = memo(function ToolActivityGroup({
   active = false,
   showAvatar = true,
   agent,
+  liveProgress = null,
 }: {
   items: ToolItem[];
   /** True while the turn is still streaming and this is the trailing run —
@@ -257,13 +285,45 @@ export const ToolActivityGroup = memo(function ToolActivityGroup({
   showAvatar?: boolean;
   /** Appearance of the chatting agent, shown once the avatar goes idle. */
   agent?: AgentAvatarInfo;
+  /** Mid-delegate stage line from `a2a_tasks/_live.json`. */
+  liveProgress?: A2aLiveProgress | null;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const last = items[items.length - 1];
-  const detail = itemDetail(last);
   const title = toolActivityGroupTitle(items);
   const soloTool = singleToolName(items);
   const orderedItems = orderToolActivityItems(items);
+  const delegated = items.some(
+    (it) => isToolCall(it) && isA2aDelegateTool(it.name),
+  );
+  const delegateCall = items.find(
+    (it) => isToolCall(it) && isA2aDelegateTool(it.name),
+  ) as ToolCallMessage | undefined;
+  const peerHint = delegateCall
+    ? extractA2aPeerHint(delegateCall.args)
+    : null;
+  const resultWithProgress = [...items]
+    .reverse()
+    .find(
+      (it) =>
+        !isToolCall(it) &&
+        isA2aDelegateTool(it.name) &&
+        extractA2aProgressLines(it.content).length > 0,
+    ) as ToolResultMessage | undefined;
+  const liveLine =
+    active && delegated && liveProgress?.line ? liveProgress.line : null;
+  const detail =
+    liveLine ||
+    (resultWithProgress
+      ? resultMeta(resultWithProgress)
+      : last
+        ? itemDetail(last)
+        : "");
+  const badgePeer =
+    (active && liveProgress?.peer) ||
+    peerHint ||
+    t("chat.expertsDelegatedPeerFallback");
 
   return (
     <div
@@ -277,8 +337,22 @@ export const ToolActivityGroup = memo(function ToolActivityGroup({
         <AvatarSpacer />
       )}
       <div
-        className={`chat-tool-group${active ? " chat-tool-group--active" : ""}`}
+        className={`chat-tool-group${active ? " chat-tool-group--active" : ""}${
+          delegated ? " chat-tool-group--a2a" : ""
+        }`}
       >
+        {delegated && (
+          <div className="chat-a2a-badge" role="status">
+            {active
+              ? t("chat.expertsCollaboratingBadge", { peer: badgePeer })
+              : t("chat.expertsDelegatedBadge", { peer: badgePeer })}
+          </div>
+        )}
+        {liveLine && (
+          <div className="chat-a2a-live-stage" role="status">
+            {liveLine}
+          </div>
+        )}
         <button
           type="button"
           className="chat-tool-group-summary"

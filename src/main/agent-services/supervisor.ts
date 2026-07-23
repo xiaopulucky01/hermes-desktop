@@ -32,6 +32,7 @@ import type {
 } from "./types";
 import { getEnhancedPath, HERMES_HOME } from "../installer";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "../process-options";
+import { resolveHermesLlmEnvForAgents } from "./llm-env";
 
 const processes = new Map<string, ChildProcess>();
 /** Ids currently being stopped on purpose — skip crash auto-restart. */
@@ -151,7 +152,9 @@ export async function startAgentService(id: string): Promise<AgentServiceStartRe
       A2A_HOST: host,
       A2A_PORT: String(port),
       A2A_PUBLIC_URL: `${baseUrl}/`,
-      // Package/link .env (OPENAI_API_KEY etc.) + installed .env (AUTH_TOKEN)
+      // Active Hermes profile LLM (keys + OpenAI/InkOS/CrewAI aliases)
+      ...resolveHermesLlmEnvForAgents(),
+      // Package/link .env + installed .env override Hermes defaults when set
       ...loadAgentServiceEnv(id, workDir),
       ...(authToken ? { [tokenEnv]: authToken, AUTH_TOKEN: authToken } : {}),
     };

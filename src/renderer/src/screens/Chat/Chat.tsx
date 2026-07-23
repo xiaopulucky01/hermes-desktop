@@ -182,6 +182,13 @@ function Chat({
     }
   }, [runId, messages, onTitleChange]);
   const [toolProgress, setToolProgress] = useState<string | null>(null);
+  const [a2aLiveProgress, setA2aLiveProgress] = useState<{
+    peer: string;
+    line: string;
+    endpoint: string;
+    task_id: string;
+    ts: number;
+  } | null>(null);
   const [usage, setUsage] = useState<UsageState | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [remoteMode, setRemoteMode] = useState(false);
@@ -615,9 +622,32 @@ function Chat({
     activeTurnRef.current = null;
     setUsage(null);
     setToolProgress(null);
+    setA2aLiveProgress(null);
     queueRef.current = [];
     setQueuedMessages([]);
   }, [isLoading, runId, hermesSessionId, setMessages, modelConfig.reload]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      setA2aLiveProgress(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const live = await window.hermesAPI.getA2aLiveProgress();
+        if (!cancelled) setA2aLiveProgress(live);
+      } catch {
+        if (!cancelled) setA2aLiveProgress(null);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 400);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isLoading]);
 
   const localCommands = useLocalCommands({
     profile,
@@ -1066,6 +1096,7 @@ function Chat({
               onDeny={actions.handleDeny}
               onClarifyResolved={handleClarifyResolved}
               agentAvatar={agentAvatar}
+              a2aLiveProgress={a2aLiveProgress}
             />
           )}
           <div ref={bottomRef} />
@@ -1091,6 +1122,8 @@ function Chat({
         />
         <AvailableExpertsBar
           preferredKey={preferredExpert?.key ?? null}
+          busyEndpoint={a2aLiveProgress?.endpoint || null}
+          busyPeer={a2aLiveProgress?.peer || null}
           onPreferExpert={(expert) =>
             setPreferredExpert((prev) =>
               prev?.key === expert.key ? null : expert,

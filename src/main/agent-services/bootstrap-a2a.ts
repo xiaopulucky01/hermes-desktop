@@ -188,6 +188,35 @@ export function listA2aRegistryExperts(): Array<{
   }));
 }
 
+/** Latest mid-delegate A2A stage line written by the outbound plugin. */
+export function readA2aLiveProgress(): {
+  peer: string;
+  line: string;
+  task_id: string;
+  endpoint: string;
+  ts: number;
+} | null {
+  try {
+    const path = join(HERMES_HOME, "a2a_tasks", "_live.json");
+    const raw = readFileSync(path, "utf-8");
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const line = typeof data.line === "string" ? data.line.trim() : "";
+    if (!line) return null;
+    const ts = typeof data.ts === "number" ? data.ts : 0;
+    // Ignore stale snapshots left behind if a crash skipped clear_live_progress.
+    if (ts > 0 && Date.now() / 1000 - ts > 600) return null;
+    return {
+      peer: typeof data.peer === "string" ? data.peer : "",
+      line,
+      task_id: typeof data.task_id === "string" ? data.task_id : "",
+      endpoint: typeof data.endpoint === "string" ? data.endpoint : "",
+      ts,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function bootstrapAgentServiceA2a(options: {
   baseUrl: string;
   cardPaths?: string[];

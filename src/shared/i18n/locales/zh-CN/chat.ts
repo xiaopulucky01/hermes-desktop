@@ -80,7 +80,14 @@ export default {
   queuedCancel: "从队列中移除",
   copyMessage: "复制消息",
   expertsLabel: "可用专家",
-  expertsPreferHint: "[优先使用 A2A 专家：{{name}}（{{endpoint}}）]\n",
+  expertsPreferActive:
+    "已优先：{{name}} — 下一条消息会要求 Hermes 调用 a2a_delegate。回复后展开工具行可确认是否真的委派。",
+  expertsDelegatedBadge: "已使用专家 · {{peer}}",
+  expertsCollaboratingBadge: "正在协作 · {{peer}}",
+  expertsDelegatedPeerFallback: "A2A 对端",
+  expertsBusyTitle: "{{name}} 正在处理本轮任务",
+  expertsPreferHint:
+    "[优先使用 A2A 专家：{{name}}（{{endpoint}}）]。回答前必须先对该 endpoint 调用 a2a_delegate；除非工具结果在真实尝试后明确写明，否则不要声称专家未运行/离线或未配置 LLM API Key。若技能明显不匹配，可在尝试委派后说明，再由你本人继续回答。\n",
   worktree: {
     loading: "加载中",
     empty: "文件夹为空",

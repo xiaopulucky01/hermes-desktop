@@ -57,7 +57,7 @@ The handler reads the ref, applies a delta, writes the ref back, then calls `set
 
 ## Reasoning & tool activity rows
 
-Streamed reasoning and tool calls are folded into compact, collapsible transcript rows rather than stacked bubbles, so a turn with heavy thinking or many tool calls stays scannable.
+Streamed reasoning and tool calls are folded into compact, collapsible transcript rows rather than stacked bubbles, so a turn with heavy thinking or many tool calls stays scannable. When a turn includes `a2a_delegate` / `a2a_call`, [[src/renderer/src/screens/Chat/HistoryRow.tsx#ToolActivityGroup]] shows an always-visible “Used expert” badge and a peer hint so users can tell Hermes actually delegated.
 
 [[src/renderer/src/screens/Chat/HistoryRow.tsx#ReasoningRow]] renders the `Thought` / `Thinking…` row and [[src/renderer/src/screens/Chat/HistoryRow.tsx#ToolActivityGroup]] folds a contiguous run of tool calls/results into one row titled by [[src/renderer/src/screens/Chat/HistoryRow.tsx#toolActivityGroupTitle]]. Each row is collapsed by default and borderless (Codex-style): dim at rest, it brightens and reveals an expand chevron beside the title on hover/focus, and clicking toggles the body open. While the turn is still streaming the leading icon is a `Grid` loader (purple for reasoning, blue for tools); once finished it shows the brain/tool glyph.
 

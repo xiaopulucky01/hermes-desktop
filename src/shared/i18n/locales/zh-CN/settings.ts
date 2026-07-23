@@ -51,6 +51,30 @@ export default {
     statusStarting: "启动中",
     statusError: "错误",
   },
+  acp: {
+    intro:
+      "将 Zed、JetBrains、VS Code 等支持 ACP 的编辑器连接到本地 Hermes 引擎。桌面端会生成带正确 Python 路径与 HERMES_HOME 的启动脚本。",
+    title: "Agent Client Protocol (ACP)",
+    subtitle: "把 Hermes 用作编辑器内的原生编码助手",
+    statusReady: "就绪",
+    statusUnavailable: "需要设置",
+    readyHint:
+      "将 IDE 的外部 Agent 设置指向下方启动命令。日志走 stderr，stdout 专供 ACP 协议流量。",
+    launcherPath: "启动命令",
+    zedConfig: "Zed Agent 配置（示例）",
+    refreshLauncher: "刷新启动脚本",
+    openDocs: "ACP 文档",
+    copy: "复制",
+    copied: "已复制",
+    unavailableRemote:
+      "ACP 需要本地 Hermes 引擎。请将连接模式切换为本地 — 远程与 SSH 模式无法从本机暴露 stdio ACP。",
+    unavailablePython:
+      "未安装或找不到 Hermes Python。请先在「关于与更新」中安装或修复引擎。",
+    unavailableExtra: "当前 Hermes Python 环境中未安装 ACP 适配器。",
+    unavailableCli: "Hermes CLI 不可用。",
+    installExtra: "安装 ACP 扩展",
+    installing: "安装中…",
+  },
   analytics: {
     label: "发送匿名使用情况分析",
     hint: "通过向项目的分析服务发送匿名、聚合的使用数据来帮助改进 Hermes。您可以随时关闭。",

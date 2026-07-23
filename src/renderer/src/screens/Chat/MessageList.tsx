@@ -2,6 +2,7 @@ import { memo, useMemo } from "react";
 import { HermesAvatar, MessageRow } from "./MessageRow";
 import type { AgentAvatarInfo } from "./MessageRow";
 import { ReasoningRow, ToolActivityGroup } from "./HistoryRow";
+import type { A2aLiveProgress } from "./HistoryRow";
 import { ClarifyCard } from "./ClarifyCard";
 import type {
   ChatMessage,
@@ -26,6 +27,8 @@ interface MessageListProps {
   /** Appearance of the agent this conversation is with, so idle avatars show
    *  the agent's profile picture instead of the loading gif. */
   agentAvatar?: AgentAvatarInfo;
+  /** Live A2A collaboration stage while a delegate is in flight. */
+  a2aLiveProgress?: A2aLiveProgress | null;
 }
 
 function TypingIndicator({
@@ -73,6 +76,7 @@ export const MessageList = memo(function MessageList({
   onDeny,
   onClarifyResolved,
   agentAvatar,
+  a2aLiveProgress = null,
 }: MessageListProps): React.JSX.Element {
   // Bubbles with empty content are still hidden (live-stream placeholders).
   // History rows pass through unconditionally.
@@ -120,6 +124,11 @@ export const MessageList = memo(function MessageList({
             visibleMessages[start - 1].role !== "agent"
           }
           agent={agentAvatar}
+          liveProgress={
+            isLoading && i === visibleMessages.length - 1
+              ? a2aLiveProgress
+              : null
+          }
         />,
       );
       continue;

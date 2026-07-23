@@ -23,7 +23,7 @@ export const A2A_PLUGIN_NAME = "a2a-platform";
 export const A2A_TOOLSET_NAME = "a2a";
 export const A2A_DEFAULT_PORT = 9900;
 
-const A2A_ORCHESTRATOR_MARKER = "<!-- hermes-a2a-orchestrator -->";
+const A2A_ORCHESTRATOR_MARKER = "<!-- hermes-a2a-orchestrator-v3 -->";
 const A2A_ORCHESTRATOR_HINT = `${A2A_ORCHESTRATOR_MARKER}
 ## External A2A experts
 
@@ -33,7 +33,11 @@ When the user's request matches a specialist capability available via A2A peers:
 3. Call \`a2a_delegate\` with that endpoint and a clear task message.
 4. Reply to the user in natural language with the result. Do not expose tool names unless asked.
 
-If no peer fits, handle the request yourself. If a peer is installed but unreachable, say so briefly and continue without it.
+If no peer fits, handle the request yourself and say the specialist is a poor skill match — do **not** claim an expert is "not running" / offline unless \`a2a_delegate\` (or a probe) actually failed to reach it.
+
+When the user message starts with an explicit prefer-expert hint naming an endpoint, you **must** call \`a2a_delegate\` to that endpoint at least once before answering yourself.
+
+Do **not** invent that an expert is missing an LLM API key. Hermes injects this app's active model credentials into agent services on start. Only report a key problem if the delegate tool result explicitly says so after a real attempt.
 `;
 
 function pluginYamlPath(dir: string): string {
@@ -258,6 +262,25 @@ function ensureDisplayA2aStreaming(content: string): {
   return { content: `${content}${addition}`, changed: true };
 }
 
+/** Outbound delegate/discover default timeout (InkOS book create can exceed 2 min). */
+function ensureA2aDefaultsTimeout(content: string): {
+  content: string;
+  changed: boolean;
+} {
+  if (
+    /^a2a:\s*\r?\n(?:[ \t]+.*\r?\n)*?[ \t]+defaults:\s*\r?\n(?:[ \t]+.*\r?\n)*?[ \t]+timeout:\s*\d+/m.test(
+      content,
+    )
+  ) {
+    return { content, changed: false };
+  }
+  const sep = content === "" || content.endsWith("\n") ? "" : "\n";
+  const addition =
+    `${sep}# Desktop app A2A client defaults (auto-configured)\n` +
+    "a2a:\n  defaults:\n    timeout: 600\n    prefer_streaming: true\n";
+  return { content: `${content}${addition}`, changed: true };
+}
+
 /** Candidate roots that contain `plugins/platforms/a2a/plugin.yaml`. */
 export function resolveHermesA2aPluginDir(): string | null {
   const candidates: string[] = [];
@@ -362,6 +385,7 @@ export function ensureA2aConfig(profile?: string): boolean {
     () => ensureYamlListItemUnderBlock(content, "plugins", "enabled", A2A_PLUGIN_NAME),
     () => ensurePlatformsA2a(content),
     () => ensureDisplayA2aStreaming(content),
+    () => ensureA2aDefaultsTimeout(content),
     () => ensureOptionalToolsetList(content, "platform_toolsets", "cli", A2A_TOOLSET_NAME),
     () =>
       ensureOptionalToolsetList(
@@ -415,18 +439,20 @@ export function ensureA2aEnv(profile?: string): boolean {
 }
 
 /**
- * Append an orchestrator hint to SOUL.md so the main agent auto-routes via
- * a2a_registry_list → a2a_delegate. Idempotent via an HTML comment marker.
+ * Upsert an orchestrator hint into SOUL.md so the main agent auto-routes via
+ * a2a_registry_list → a2a_delegate. Replaces any prior hermes-a2a-orchestrator block.
  */
 export function ensureA2aOrchestratorHint(profile?: string): boolean {
   // @lat: [[lat.md/agent-services#Agent services#Orchestrator routing]]
   const current = readSoul(profile);
-  if (current.includes(A2A_ORCHESTRATOR_MARKER)) return false;
-  const base = current.trim();
-  const next = base
-    ? `${base}\n\n${A2A_ORCHESTRATOR_HINT}`
+  const markerIdx = current.search(/<!-- hermes-a2a-orchestrator/);
+  const stripped =
+    markerIdx >= 0 ? current.slice(0, markerIdx).trimEnd() : current.trimEnd();
+  const next = stripped
+    ? `${stripped}\n\n${A2A_ORCHESTRATOR_HINT}`
     : A2A_ORCHESTRATOR_HINT;
+  if (next.trim() === current.trim()) return false;
   if (!writeSoul(next, profile)) return false;
-  console.log("[a2a] Appended A2A orchestrator hint to SOUL.md");
+  console.log("[a2a] Upserted A2A orchestrator hint in SOUL.md");
   return true;
 }

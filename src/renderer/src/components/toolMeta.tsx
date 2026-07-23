@@ -294,6 +294,12 @@ const TOOL_NAME_TO_KEY: Record<string, string> = {
   search_sessions: "session_search",
   delegate: "delegation",
   spawn_agent: "delegation",
+  a2a_delegate: "delegation",
+  a2a_call: "delegation",
+  a2a_registry_list: "delegation",
+  a2a_discover: "delegation",
+  a2a_list: "delegation",
+  a2a_task_watch: "delegation",
   schedule: "cronjob",
 };
 
@@ -312,6 +318,7 @@ const KEYWORD_TO_KEY: ReadonlyArray<readonly [string, string]> = [
   ["memory", "memory"],
   ["remember", "memory"],
   ["delegat", "delegation"],
+  ["a2a_", "delegation"],
   ["agent", "delegation"],
   ["cron", "cronjob"],
   ["schedul", "cronjob"],
@@ -348,6 +355,15 @@ export function iconKeyForTool(toolName: string): string {
 /** "execute_code" → "Execute Code"; strips MCP "server__" prefixes. */
 export function humanizeToolName(toolName: string): string {
   const base = toolName.includes("__") ? toolName.split("__").pop()! : toolName;
+  const a2aLabels: Record<string, string> = {
+    a2a_delegate: "A2A Delegate",
+    a2a_call: "A2A Delegate",
+    a2a_registry_list: "A2A Experts",
+    a2a_discover: "A2A Discover",
+    a2a_list: "A2A List",
+    a2a_task_watch: "A2A Task Watch",
+  };
+  if (a2aLabels[base]) return a2aLabels[base];
   const words = base
     .replace(/[_-]+/g, " ")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -356,6 +372,56 @@ export function humanizeToolName(toolName: string): string {
     .filter(Boolean);
   if (words.length === 0) return toolName;
   return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+/** True when the tool is an outbound A2A client call. */
+export function isA2aClientTool(toolName: string): boolean {
+  const base = (
+    toolName.includes("__") ? toolName.split("__").pop()! : toolName
+  ).toLowerCase();
+  return base.startsWith("a2a_") || base === "delegate";
+}
+
+export function isA2aDelegateTool(toolName: string): boolean {
+  const base = (
+    toolName.includes("__") ? toolName.split("__").pop()! : toolName
+  ).toLowerCase();
+  return base === "a2a_delegate" || base === "a2a_call";
+}
+
+/** Best-effort peer endpoint/name from tool args JSON. */
+export function extractA2aPeerHint(args: string): string | null {
+  try {
+    const parsed = JSON.parse(args) as Record<string, unknown>;
+    for (const key of ["endpoint", "url", "peer", "agent", "name"]) {
+      const v = parsed[key];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  } catch {
+    /* plain text args */
+  }
+  const m = args.match(/https?:\/\/[^\s"',}]+/);
+  return m ? m[0] : null;
+}
+
+/** Parse the `--- progress ---` block appended by streaming a2a_delegate. */
+export function extractA2aProgressLines(content: string): string[] {
+  const marker = "--- progress ---";
+  const idx = content.indexOf(marker);
+  if (idx < 0) return [];
+  return content
+    .slice(idx + marker.length)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+/** Last progress/stage line for collapsed A2A tool headers. */
+export function extractA2aLastProgressLine(content: string): string | null {
+  const lines = extractA2aProgressLines(content);
+  if (lines.length > 0) return lines[lines.length - 1] ?? null;
+  const m = content.match(/^\[([^\]]+)\]/m);
+  return m ? m[0] : null;
 }
 
 /** Inline icon for a tool name, sized for chat rows. */

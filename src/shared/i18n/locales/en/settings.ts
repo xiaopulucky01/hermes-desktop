@@ -55,13 +55,13 @@ export default {
   },
   acp: {
     intro:
-      "Connect Zed, JetBrains, VS Code (ACP extension), and other ACP-compatible editors to your local Hermes engine. IDEs spawn Hermes in stdio JSON-RPC mode — the desktop generates a launcher script with the correct Python path and HERMES_HOME.",
+      "Connect Zed, JetBrains, VS Code, and other ACP-compatible editors to your local Hermes engine. The desktop generates a launcher with the correct Python path and HERMES_HOME.",
     title: "Agent Client Protocol (ACP)",
     subtitle: "Use Hermes as an editor-native coding agent",
     statusReady: "Ready",
     statusUnavailable: "Setup required",
     readyHint:
-      "Point your IDE's external agent setting at the launcher path below. Hermes logs go to stderr; stdout stays reserved for ACP protocol traffic.",
+      "Point your IDE's external agent setting at the launcher below. Logs go to stderr — stdout stays reserved for ACP traffic.",
     launcherPath: "Launcher command",
     zedConfig: "Zed agent config (example)",
     refreshLauncher: "Refresh launcher",

@@ -40,6 +40,7 @@ export {
   stopAgentService,
   stopAllAgentServices,
 } from "./supervisor";
+export { resolveHermesLlmEnvForAgents } from "./llm-env";
 export { allocateAgentServicePort, probeTcp } from "./port-manager";
 export {
   hasPackageVenv,
@@ -48,7 +49,7 @@ export {
   resolveVenvPython,
   usesSharedVenv,
 } from "./python-runtime";
-export { listA2aRegistryExperts } from "./bootstrap-a2a";
+export { listA2aRegistryExperts, readA2aLiveProgress } from "./bootstrap-a2a";
 export { openAgentServiceUi, resolveAgentServiceUiUrl } from "./ui";
 export {
   validateAgentCardSkills,

@@ -101,7 +101,7 @@ a2a:
 
 ### Tools
 
-Six protocol-generic client tools; routing uses endpoint URLs and Agent Card skills, not framework names.
+Six protocol-generic client tools; routing uses endpoint URLs and Agent Card skills, not framework names. Default outbound timeout is **600s** (`a2a.defaults.timeout`) so long peer work (e.g. InkOS `book create`) does not falsely report `timed out`.
 
 | Tool | Purpose |
 |------|---------|
@@ -118,7 +118,15 @@ Installed third-party A2A services (isolated packages under agent-services) are 
 
 ### Streaming and task trace
 
-Outbound streaming uses [[resources/hermes-a2a/plugins/platforms/a2a/client.py#stream_post_json]] (SSE) and [[resources/hermes-a2a/plugins/platforms/a2a/client.py#parse_stream_event]]. Progress lines are persisted under `%LOCALAPPDATA%\\hermes\\a2a_tasks/<task_id>.jsonl`.
+Outbound SSE uses [[resources/hermes-a2a/plugins/platforms/a2a/client.py#stream_post_json]] and [[resources/hermes-a2a/plugins/platforms/a2a/client.py#parse_stream_event]].
+
+`parse_stream_event` accepts nested `statusUpdate` and modern `kind: status-update`. [[resources/hermes-a2a/plugins/platforms/a2a/client.py#_iter_sse_json_payloads]] normalizes CRLF frames from `sse_starlette` (LF-only splitters drop all events and leave the UI on “Connecting…”). Events go to `a2a_tasks/<task_id>.jsonl`; the latest stage is mirrored to `a2a_tasks/_live.json` via [[resources/hermes-a2a/plugins/platforms/a2a/protocol.py#persist_live_progress]].
+
+### Visible collaboration
+
+A2A should feel like staged peer work, not a black-box tool.
+
+Chat polls [[src/main/agent-services/bootstrap-a2a.ts#readA2aLiveProgress]] while a turn loads, shows a collaborating badge / live stage on [[src/renderer/src/screens/Chat/HistoryRow.tsx#ToolActivityGroup]], marks the busy expert chip, and expands the `--- progress ---` timeline after return. Streaming peers (InkOS `streaming=True` + `TaskUpdater` stages) feed those lines.
 
 ### Agent Card discovery
 

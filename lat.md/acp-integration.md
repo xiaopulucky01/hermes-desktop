@@ -26,4 +26,4 @@ Settings and copy-paste snippets read launch metadata from the main process over
 
 [[src/main/acp.ts#getAcpLaunchInfo]] returns launcher path, raw command/args/env, and a Zed example JSON snippet. Exposed to the renderer as `get-acp-launch-info`; optional `install-acp-extra` installs the upstream extra into non-bundled venvs.
 
-Settings → IDE Integration ([[src/renderer/src/components/settings/IdeIntegrationPane.tsx]]) surfaces copy-paste launcher and Zed config text for ACP-compatible editors.
+Settings → IDE Integration ([[src/renderer/src/components/settings/IdeIntegrationPane.tsx]]) shows copyable launcher and Zed config snippet cards for ACP-compatible editors.

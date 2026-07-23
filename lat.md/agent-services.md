@@ -98,7 +98,13 @@ Allocation walks the range until `probeTcp` reports free.
 
 ### Start agent service
 
-Allocate port → spawn with shared interpreter → merge package `.env` + installed `.env` (for keys like `OPENAI_API_KEY`) → card probe → persist state.
+Allocate port → spawn with shared interpreter → inject active Hermes LLM env ([[src/main/agent-services/llm-env.ts#resolveHermesLlmEnvForAgents]]) → merge package `.env` + installed `.env` (overrides) → card probe → persist state.
+
+### Inherits Hermes LLM
+
+Spawn injects this project's active model as `OPENAI_*` / `INKOS_LLM_*` / `CREWAI_BRIDGE_MODEL` for every agent.
+
+Disable with `HERMES_AGENT_SERVICES_INHERIT_LLM=0`. Restart agents after changing the Hermes model. InkOS defaults to `interact` (not `doctor`) so Hermes is not misled by doctor's project-file "API Key: Missing" line when process env already has keys.
 
 ### Boot on app start
 
@@ -122,7 +128,9 @@ Enabled services get limited backoff restarts after unexpected exit.
 
 ## Orchestrator routing
 
-[[src/main/a2a-plugin.ts#ensureA2aOrchestratorHint]] appends SOUL.md guidance to list peers and delegate by skill.
+[[src/main/a2a-plugin.ts#ensureA2aOrchestratorHint]] upserts SOUL.md guidance to list peers and `a2a_delegate` by skill.
+
+Prefer-expert hints must not invent "offline" or "missing LLM API key" unless the delegate tool result says so after a real attempt — Hermes injects profile LLM env into agent services on start.
 
 ## IPC and preload
 
@@ -141,6 +149,12 @@ Renderer APIs cover list/install/start/stop, experts, updates, scaffold, and UI 
 `agents-template/` is the generic A2A stub; real adapters live under `agents/<id>/`.
 
 Upstream clones (e.g. CrewAI) stay in `projects/` and are installed into shared-venv by that agent's `post_install`. Hermes never starts `projects/` directly. `agents/crewai-agent` exposes multi-skill Agent Cards (research, web, files, code, data) wired to local CrewAI tools.
+
+`agents/orca-agent` bridges the Orca desktop CLI (sibling `projects/orca-agent`): worktree, terminal, browser, orchestration, computer_use, emulator, automations, linear, general. It does not pip-install Electron. If `orca` is missing from PATH, it auto-discovers the checkout and runs `node …/orca-dev.mjs` after `pnpm run build:cli` / `node scripts/ensure-cli.mjs` (which defaults `ELECTRON_MIRROR` to npmmirror when GitHub times out); otherwise it returns setup instructions.
+
+`agents/meetily-agent` is a read-only SQLite bridge over `projects/meetily-agent` (Meetily Tauri meeting app): list/search meetings and read transcripts, summaries, and notes from local `meeting_minutes.sqlite` — capture/ASR stay in the desktop app.
+
+`agents/inkos-agent` bridges the InkOS story CLI (`@actalk/inkos` / sibling `projects/inkos-agent`): interact, book, write, short, translate, audit, forecast, import_export, general — prefer `inkos interact --json`. Hermes injects profile LLM env; the adapter maps `OPENAI_*` → `INKOS_LLM_*`, reuses sticky `--session`, recovers empty chat text from tool transcripts, runs CLI via `asyncio.to_thread` (so Agent Card stays reachable during long `book create`), and executes `inkos book create` from `propose_action` payloads.
 
 ## Ecosystem
 

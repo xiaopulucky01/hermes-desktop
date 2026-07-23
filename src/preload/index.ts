@@ -1383,6 +1383,13 @@ const hermesAPI = {
       streaming: boolean;
     }>
   > => ipcRenderer.invoke("agent-services-list-experts"),
+  getA2aLiveProgress: (): Promise<{
+    peer: string;
+    line: string;
+    task_id: string;
+    endpoint: string;
+    ts: number;
+  } | null> => ipcRenderer.invoke("a2a-live-progress"),
   ensureAgentServiceRunning: (id: string): Promise<{
     success: boolean;
     error?: string;

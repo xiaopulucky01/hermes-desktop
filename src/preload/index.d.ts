@@ -1029,6 +1029,13 @@ interface HermesAPI {
       streaming: boolean;
     }>
   >;
+  getA2aLiveProgress: () => Promise<{
+    peer: string;
+    line: string;
+    task_id: string;
+    endpoint: string;
+    ts: number;
+  } | null>;
   ensureAgentServiceRunning: (id: string) => Promise<{
     success: boolean;
     error?: string;
