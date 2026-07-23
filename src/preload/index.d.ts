@@ -15,8 +15,10 @@ import type { TokenBalancesResponse } from "../shared/tokens";
 import type { CustomProviderRecord } from "../shared/custom-providers";
 import type {
   DeviceCodeInfo,
+  EnsureHermesOneKeyResult,
   HermesAccount,
   HermesAccountUser,
+  HermesOneCreditsResult,
 } from "../shared/account";
 import type { AgentSyncResult, AgentSyncStatus } from "../shared/agent-sync";
 import type {
@@ -278,6 +280,8 @@ interface HermesAPI {
   onAccountLoginProgress: (callback: (chunk: string) => void) => () => void;
   getAccount: (profile?: string) => Promise<HermesAccount | null>;
   accountLogout: (profile?: string) => Promise<{ success: boolean }>;
+  ensureHermesOneKey: (profile?: string) => Promise<EnsureHermesOneKeyResult>;
+  getHermesOneCredits: () => Promise<HermesOneCreditsResult>;
 
   // Cloud agent sync (profiles ↔ signed-in Hermes One account)
   syncAgents: () => Promise<AgentSyncResult>;
@@ -357,6 +361,7 @@ interface HermesAPI {
       keyPath: string;
       remotePort: number;
       localPort: number;
+      dockerContainerName?: string;
     };
   }>;
   setConnectionConfig: (
@@ -384,6 +389,7 @@ interface HermesAPI {
         keyPath: string;
         remotePort: number;
         localPort: number;
+        dockerContainerName?: string;
       };
     }) => void,
   ) => () => void;
@@ -394,7 +400,24 @@ interface HermesAPI {
     keyPath: string,
     remotePort: number,
     localPort: number,
+    dockerContainerName?: string,
   ) => Promise<boolean>;
+  inspectSshHermesTarget: (
+    host: string,
+    port: number,
+    username: string,
+    keyPath: string,
+    remotePort: number,
+    dockerContainerName?: string,
+  ) => Promise<import("../shared/ssh-docker").SshHermesTargetInspection>;
+  provisionSshDockerTarget: (
+    host: string,
+    port: number,
+    username: string,
+    keyPath: string,
+    remotePort: number,
+    dockerContainerName: string,
+  ) => Promise<import("../shared/ssh-docker").SshDockerProvisionResult>;
   testRemoteConnection: (url: string, apiKey?: string) => Promise<boolean>;
   probeRemoteAuthMode: (
     url: string,

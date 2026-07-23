@@ -1,4 +1,5 @@
 import type { ChatToolEvent } from "../../../../shared/chat-stream";
+import { isLossyChunkCopy } from "./lossyText";
 import type { ActiveTurn, ChatBubbleMessage, ChatMessage } from "./types";
 import {
   hasGluedNumberedBoldLists,
@@ -547,7 +548,6 @@ export function mergeStreamedWithFinal(
   const normFinal = normalizeText(finalContent);
   if (normFinal.includes(normStreamed)) return finalContent;
   if (normStreamed.includes(normFinal)) return streamedContent;
-
   const streamedGarbled = looksGarbledMarkdown(streamedContent);
   const finalGarbled = looksGarbledMarkdown(finalContent);
   if (
@@ -566,6 +566,18 @@ export function mergeStreamedWithFinal(
     streamedContent.length >= finalContent.length * 0.4
   ) {
     return streamedContent;
+  }
+  // Lossy re-assembly: the streamed deltas dropped chunks (e.g. the upstream
+  // tagged alternate chunks as `reasoning`, so the content stream only carried
+  // a subset), leaving the streamed bubble a chunk-dropped copy of the final
+  // text ("! What are we working on?" for "Hey! What are we working on
+  // today?"). Concatenating would stack the garbled partial above the clean
+  // answer — the final text replaces it. The run-based matcher plus its
+  // length/coverage guards keep the pre-tool-call + answer pair (#746,
+  // genuinely different texts) on the concatenate path: unrelated sentences
+  // only embed as scattered fragments, never as contiguous chunk runs.
+  if (isLossyChunkCopy(normStreamed, normFinal)) {
+    return finalContent;
   }
 
   const overlap = tailHeadOverlap(streamedContent, finalContent);

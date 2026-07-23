@@ -17,6 +17,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
 import { useI18n } from "../../components/useI18n";
+import { OrbLoader } from "../../components/OrbLoader";
 import type {
   RegistryKind,
   RegistryItem,
@@ -461,7 +462,7 @@ export default function Discover({
                 )}
                 <div className="discover-modal-content">
                   {detailLoading ? (
-                    <div className="loading-spinner" />
+                    <OrbLoader state="searching" size={64} />
                   ) : (
                     <>
                       {detailData?.rows && detailData.rows.length > 0 ? (
@@ -572,7 +573,7 @@ export default function Discover({
 
       {loading ? (
         <div className="discover-state">
-          <div className="loading-spinner" />
+          <OrbLoader state="searching" size={64} />
         </div>
       ) : error && !hasResults ? (
         <div className="discover-state">
