@@ -1490,7 +1490,33 @@ const BARE_CODE_PATTERNS = [
   /^\S['"]\s*,\s*\(\s*(?:req|res)\b/,
   /^\s*\w+\.\w+\([^)]*\)\s*;?\s*$/,
   /^\s*\}\)\s*;?\s*$/,
+  // Control-flow / brace lines that sit mid-function (`try {`, `} catch {`).
+  /^\s*(?:try|catch|finally|else|do)\b/,
+  /^\s*\}?\s*(?:catch|finally|else)\b/,
+  /^\s*(?:if|elif|for|while|switch|with|except)\b/,
+  // Member assignment: `pkg.dependencies = …`
+  /^\s*[\w$]+(?:\.[\w$]+)+\s*[=!]/,
+  // Spread / typed params / object fields: `...opts,`, `cwd: root,`, `foo: Record<…>`
+  /^\s*\.\.\.[\w$]/,
+  /^\s*[\w$]+\??\s*:\s*(?:["'`[{]|\.\.\.|[\w$.]*<)/,
+  /^\s*[\w$]+\??\s*:\s*.+,\s*$/,
 ];
+
+/**
+ * Mid-block source that BARE_CODE_PATTERNS misses — brace-only lines, call
+ * continuations ending in `{` / `;`, etc. Without these, an unclosed fence
+ * closes before `try {` and wrapBareCodeBlocks re-fences the rest into
+ * fragments with control-flow lines left as prose.
+ */
+function looksLikeCodeContinuation(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/^[{}()[\];,]+$/.test(trimmed)) return true;
+  // ASCII code punctuation at end, no CJK — keeps `);` / `={` / `foo(` in-fence.
+  if (/[{};]\s*$/.test(trimmed) && !/[\u4e00-\u9fff]/.test(trimmed)) return true;
+  if (/^\s*[})]/.test(line) && /[});,]/.test(trimmed)) return true;
+  return false;
+}
 
 /** True when a prose line looks like source code rather than markdown/table text. */
 function looksLikeCodeLine(line: string): boolean {
@@ -1501,7 +1527,10 @@ function looksLikeCodeLine(line: string): boolean {
   if (/^[-*+]\s/.test(trimmed)) return false;
   if (/^>\s/.test(trimmed)) return false;
   if (/^```/.test(trimmed)) return false;
-  return BARE_CODE_PATTERNS.some((pattern) => pattern.test(line) || pattern.test(trimmed));
+  if (BARE_CODE_PATTERNS.some((pattern) => pattern.test(line) || pattern.test(trimmed))) {
+    return true;
+  }
+  return looksLikeCodeContinuation(line);
 }
 
 function detectBareCodeLanguage(block: string): string {
@@ -1608,6 +1637,15 @@ function looksLikeProseInFence(line: string): boolean {
   if (/^\*\*/.test(trimmed)) return true;
   if (/\*\*[^*\n]+\*\*/.test(trimmed)) return true;
   if (/^[\u4e00-\u9fff][^\n]{0,48}[:：]\s*$/.test(trimmed)) return true;
+  // Chinese prose sentence (no code punctuation) — close unclosed fences here
+  // rather than waiting for a heading.
+  if (
+    /^[\u4e00-\u9fff]/.test(trimmed) &&
+    /[。！？；]$/.test(trimmed) &&
+    !/[{}`=<>;]|=>|\.\.\./.test(trimmed)
+  ) {
+    return true;
+  }
   if (/\)[\w\u4e00-\u9fff][^\n]*\*\*/.test(trimmed)) return true;
   if (/^[\u4e00-\u9fff\w][^\n]*\*\*[^\n]*[:：]/.test(trimmed)) return true;
   return false;

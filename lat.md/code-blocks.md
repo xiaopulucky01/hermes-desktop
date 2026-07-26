@@ -50,12 +50,20 @@ Additional repair passes run before the prose-only table fixes:
 - **Glued headings** — `###标题` (no space after hashes) is broken onto its own line with a space inserted before the title text.
 - **Entity-relation chains** — knowledge-graph examples that put each `→` on its own line (`Alice` / `→` / `works_at` / `→` / `Acme`) are collapsed into one list row (`- Alice → works_at → Acme`). Lone arrow-only lines are not treated as diagram blocks, so they no longer render as empty `text` code boxes.
 - **Bare code** — consecutive lines that look like source (e.g. `app.get(…)`, `res.json(…)` without an opening fence) are wrapped in a detected-language fence so Prism can highlight them.
-- **Unclosed fences** — a missing closing ` ``` ` before trailing prose is inserted so later markdown is not swallowed as code. Detection also treats markdown headings, bold markers, tables, and section labels inside an open fence as prose boundaries, and repeats until every stray opening fence is closed.
+- **Unclosed fences** — a missing closing ` ``` ` before trailing prose is inserted so later markdown is not swallowed as code. Detection treats markdown headings, bold markers, tables, Chinese prose sentences, and section labels as prose boundaries, and repeats until every stray opening fence is closed. Mid-function source that is not a top-level statement — `try {`, `} catch {`, typed params (`foo: Record<…>`), member assigns (`pkg.deps =`), spreads — still counts as code so the closer does not slice the fence into fragments with brace lines left as prose (see below).
 - **Glued tree diagrams** — one-line agent/skill tree output glued with `|` separators (e.g. `TypeScript 大师 (Agent) └── SOUL.md … | └── skills/ …`) is split onto separate lines and wrapped in a `text` fence so it renders in monospace `pre` instead of wrapping as prose.
 - **Bare layer diagrams** — multi-line MCP/A2A stack diagrams with bracket labels, vertical connectors, and agent arrows but no opening fence are wrapped in a `text` fence so they align in monospace `pre`.
 - **Pipe-comparison tiers** — product-tier lines that glue columns with `| | - item` (not valid GFM) become a `###` heading plus bullet list.
 
 Tables are wrapped in `.chat-table-wrap` for horizontal scroll only; cell typography matches the original agent-bubble table styles. Parsed `h1`–`h4` inside `.chat-bubble-agent` inherit body `font-weight` (not semibold) so repaired headings like `### 1. …` do not look bolder than surrounding prose. `strong` / `b` use `font-weight: 600` so Tailwind preflight does not make emphasis invisible.
+
+### Unclosed fence keeps control-flow intact
+
+When the model omits a closing fence, `try {` / `} catch {` / `else {` lines must stay inside the block — they are source, not the prose boundary that triggers an early close.
+
+### Unclosed fence keeps typed params intact
+
+Typed parameter lines and member assignments (`dependencies: Record<string, string>,`, `pkg.dependencies = {…}`) must likewise stay inside an unclosed fence so the block is not split around them.
 
 ## Empty code blocks during streaming
 

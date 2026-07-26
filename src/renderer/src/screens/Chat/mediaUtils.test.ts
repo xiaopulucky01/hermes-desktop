@@ -686,6 +686,59 @@ describe("normalizeAgentMarkdown", () => {
     expect(out).toContain("class MyGraph:");
   });
 
+  // @lat: [[code-blocks#LLM markdown normalization#Unclosed fence keeps control-flow intact]]
+  it("does not fragment an unclosed fence at try/catch braces", () => {
+    const raw = [
+      "```typescript",
+      "function isSymlink(path: string): boolean {",
+      "  try {",
+      '    const stat = require("fs").lstatSync(path);',
+      "    return stat.isSymbolicLink();",
+      "  } catch {",
+      "    return false;",
+      "  }",
+      "}",
+      "",
+      "### 3. Next section",
+      "Some prose here.",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("try {");
+    expect(out).toContain("} catch {");
+    expect(out).not.toMatch(/```\r?\n\s*try \{/);
+    expect(out).not.toMatch(/```\r?\n\s*\} catch/);
+    expect(out).toContain("### 3. Next section");
+    expect(out.indexOf("### 3. Next section")).toBeGreaterThan(
+      out.indexOf("return false;"),
+    );
+  });
+
+  // @lat: [[code-blocks#LLM markdown normalization#Unclosed fence keeps typed params intact]]
+  it("does not fragment an unclosed fence at typed params or member assigns", () => {
+    const raw = [
+      "```javascript",
+      "export function installToSharedNodeModules(",
+      "  dependencies: Record<string, string>,",
+      "  devDependencies: Record<string, string> = {}",
+      "): void {",
+      "  const sharedRoot = ensureSharedNodeModules();",
+      "  pkg.dependencies = { ...pkg.dependencies, ...dependencies };",
+      '  execFileSync("npm", ["install"], {',
+      "    cwd: sharedRoot,",
+      "    ...HIDDEN_SUBPROCESS_OPTIONS,",
+      '    stdio: "inherit"',
+      "  });",
+      "}",
+      "",
+      "上面的代码可以直接部署。",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out.match(/^```/gm)?.length).toBe(2);
+    expect(out).toContain("dependencies: Record<string, string>,");
+    expect(out).toContain("pkg.dependencies = {");
+    expect(out).toContain("上面的代码可以直接部署。");
+  });
+
   it("does not corrupt table rows while repairing broken bold markers", () => {
     const raw = [
       "| 维度 | crewAI | LangGraph |",
