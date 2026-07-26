@@ -739,6 +739,52 @@ describe("normalizeAgentMarkdown", () => {
     expect(out).toContain("上面的代码可以直接部署。");
   });
 
+  // @lat: [[code-blocks#LLM markdown normalization#Unclosed fence keeps call args and block comments intact]]
+  it("does not fragment an unclosed fence at call-arg commas or block-comment bullets", () => {
+    const raw = [
+      "```javascript",
+      "function linkProjectNodeModules(projectLink, sharedNodeModules) {",
+      "  // 注意：Windows 需要特殊处理符号链接",
+      '  if (process.platform === "win32") {',
+      "    // Windows上使用junction代替symlink",
+      '    execFileSync("cmd", ["/c", "mklink", "/j", projectLink, sharedNodeModules],',
+      "      HIDDEN_SUBPROCESS_OPTIONS);",
+      "  } else {",
+      '    symlinkSync(sharedNodeModules, projectLink, "junction");',
+      "  }",
+      "}",
+      "/****",
+      "• 安装依赖到共享node_modules",
+      "*/",
+      "export function installToSharedNodeModules(",
+      "  dependencies: Record<string, string>,",
+      "  devDependencies: Record<string, string> = {}",
+      "): void {",
+      "  const sharedRoot = ensureSharedNodeModules();",
+      '  const pkgPath = join(sharedRoot, "package.json");',
+      "}",
+      "",
+      "上面的代码可以直接部署。",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out.match(/^```/gm)?.length).toBe(2);
+    expect(out).not.toMatch(
+      /```\r?\n\s*execFileSync\("cmd"/,
+    );
+    expect(out).not.toMatch(/```\r?\n\s*HIDDEN_SUBPROCESS_OPTIONS/);
+    expect(out).not.toMatch(/```\r?\n\s*\*\//);
+    expect(out).toContain(
+      'execFileSync("cmd", ["/c", "mklink", "/j", projectLink, sharedNodeModules],',
+    );
+    expect(out).toContain("HIDDEN_SUBPROCESS_OPTIONS);");
+    expect(out).toContain("• 安装依赖到共享node_modules");
+    expect(out).toContain("export function installToSharedNodeModules(");
+    expect(out).toContain("上面的代码可以直接部署。");
+    expect(out.indexOf("上面的代码可以直接部署。")).toBeGreaterThan(
+      out.indexOf("installToSharedNodeModules"),
+    );
+  });
+
   it("does not corrupt table rows while repairing broken bold markers", () => {
     const raw = [
       "| 维度 | crewAI | LangGraph |",

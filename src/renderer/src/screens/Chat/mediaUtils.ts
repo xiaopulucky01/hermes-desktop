@@ -1504,9 +1504,9 @@ const BARE_CODE_PATTERNS = [
 
 /**
  * Mid-block source that BARE_CODE_PATTERNS misses — brace-only lines, call
- * continuations ending in `{` / `;`, etc. Without these, an unclosed fence
- * closes before `try {` and wrapBareCodeBlocks re-fences the rest into
- * fragments with control-flow lines left as prose.
+ * continuations ending in `{` / `;` / `,`, etc. Without these, an unclosed fence
+ * closes before `try {` or mid-call arg lists and wrapBareCodeBlocks re-fences
+ * the rest into fragments with control-flow lines left as prose.
  */
 function looksLikeCodeContinuation(line: string): boolean {
   const trimmed = line.trim();
@@ -1514,6 +1514,14 @@ function looksLikeCodeContinuation(line: string): boolean {
   if (/^[{}()[\];,]+$/.test(trimmed)) return true;
   // ASCII code punctuation at end, no CJK — keeps `);` / `={` / `foo(` in-fence.
   if (/[{};]\s*$/.test(trimmed) && !/[\u4e00-\u9fff]/.test(trimmed)) return true;
+  // Call / array arg continuations: `execFileSync("cmd", […],` or `foo,`
+  if (
+    /,\s*$/.test(trimmed) &&
+    !/[\u4e00-\u9fff]/.test(trimmed) &&
+    (/[([`'"]/.test(trimmed) || /^\s*[\w$]+(?:\.[\w$]+)*\s*,\s*$/.test(line))
+  ) {
+    return true;
+  }
   if (/^\s*[})]/.test(line) && /[});,]/.test(trimmed)) return true;
   return false;
 }
@@ -1666,9 +1674,24 @@ function closeOneUnclosedFence(content: string): string {
 
   if (depth !== 1 || openIndex < 0) return content;
 
+  // Stay inside `/* … */` so bullets/prose inside block comments do not close
+  // the fence early (e.g. `/****` + `• 安装依赖…` + `*/`).
+  let inBlockComment = false;
   for (let i = openIndex + 1; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
+
+    const opensComment = /\/\*/.test(trimmed);
+    const closesComment = /\*\//.test(trimmed);
+    if (inBlockComment) {
+      if (closesComment) inBlockComment = false;
+      continue;
+    }
+    if (opensComment && !closesComment) {
+      inBlockComment = true;
+      continue;
+    }
+
     if (
       looksLikeProseInFence(lines[i]) ||
       (!looksLikeCodeLine(lines[i]) && !/^```/.test(trimmed))
