@@ -18,6 +18,8 @@ import {
 } from "./installer";
 import { isValidNamedProfileName, profileHome } from "./utils";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import { getEcosystemRoot } from "./ecosystem/paths";
+import { scanEcosystemSkillDirs } from "./ecosystem/installer";
 
 export interface InstalledSkill {
   name: string;
@@ -74,48 +76,61 @@ function parseSkillFrontmatter(content: string): {
  * Structure: skills/<category>/<skill-name>/SKILL.md
  */
 export function listInstalledSkills(profile?: string): InstalledSkill[] {
-  const skillsDir = join(profileHome(profile), "skills");
-  if (!existsSync(skillsDir)) return [];
-
   const skills: InstalledSkill[] = [];
+  const skillsDir = join(profileHome(profile), "skills");
 
-  try {
-    const categories = readdirSync(skillsDir);
+  if (existsSync(skillsDir)) {
+    try {
+      const categories = readdirSync(skillsDir);
 
-    for (const category of categories) {
-      const categoryPath = join(skillsDir, category);
-      if (!statSync(categoryPath).isDirectory()) continue;
+      for (const category of categories) {
+        const categoryPath = join(skillsDir, category);
+        if (!statSync(categoryPath).isDirectory()) continue;
 
-      const entries = readdirSync(categoryPath);
-      for (const entry of entries) {
-        const entryPath = join(categoryPath, entry);
-        if (!statSync(entryPath).isDirectory()) continue;
+        const entries = readdirSync(categoryPath);
+        for (const entry of entries) {
+          const entryPath = join(categoryPath, entry);
+          if (!statSync(entryPath).isDirectory()) continue;
 
-        const skillFile = join(entryPath, "SKILL.md");
-        if (!existsSync(skillFile)) continue;
+          const skillFile = join(entryPath, "SKILL.md");
+          if (!existsSync(skillFile)) continue;
 
-        try {
-          const content = readFileSync(skillFile, "utf-8").slice(0, 4000);
-          const meta = parseSkillFrontmatter(content);
+          try {
+            const content = readFileSync(skillFile, "utf-8").slice(0, 4000);
+            const meta = parseSkillFrontmatter(content);
 
-          skills.push({
-            name: meta.name || entry,
-            category,
-            description: meta.description || "",
-            path: entryPath,
-          });
-        } catch {
-          skills.push({
-            name: entry,
-            category,
-            description: "",
-            path: entryPath,
-          });
+            skills.push({
+              name: meta.name || entry,
+              category,
+              description: meta.description || "",
+              path: entryPath,
+            });
+          } catch {
+            skills.push({
+              name: entry,
+              category,
+              description: "",
+              path: entryPath,
+            });
+          }
         }
       }
+    } catch {
+      // ignore
+    }
+  }
+
+  try {
+    const eco = scanEcosystemSkillDirs();
+    const seen = new Set(skills.map((s) => `${s.category}/${s.name}`));
+    for (const s of eco) {
+      const key = `${s.category}/${s.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      skills.push(s);
     }
   } catch {
-    // ignore
+    /* ignore */
   }
 
   return skills.sort(
@@ -153,6 +168,7 @@ function isAllowedSkillFile(skillFile: string): boolean {
   const allowedRoots = [
     join(HERMES_HOME, "skills"),
     join(HERMES_REPO, "skills"),
+    join(getEcosystemRoot(), "skills"),
   ].map(realOrResolved);
 
   return (

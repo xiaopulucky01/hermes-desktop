@@ -1,7 +1,6 @@
 /**
- * Shared types for the "Discover" community marketplace. The catalog is served
- * from the hermes-registry GitHub repo and consumed by both the main process
- * (fetch + install) and the renderer (browse UI).
+ * Shared types for the Discover marketplace catalog.
+ * Prefer hermes-marketplace (`HERMES_CATALOG_BASE_URL`); GitHub registry is fallback.
  */
 
 export type RegistryKind =
@@ -9,7 +8,9 @@ export type RegistryKind =
   | "mcps"
   | "agents"
   | "workflows"
-  | "a2aServices";
+  | "a2aServices"
+  | "plugins"
+  | "apps";
 
 export interface RegistryItem {
   /** Stable identifier, unique within its kind. */
@@ -23,24 +24,32 @@ export interface RegistryItem {
   version?: string;
   license?: string;
   platforms?: string[];
-  /** Folder for this entry within the registry repo (e.g. "skills/apple/apple-notes"). */
+  /** Folder for this entry within a git-backed registry (legacy). */
   path?: string;
   /** Bundled skills only: install identifier for `hermes skills install`. */
   source?: string;
-  /** A2A service: direct archive download URL. */
+  /** Direct archive download URL. */
   archiveUrl?: string;
-  /** A2A service: expected sha256 of the archive. */
+  /** Expected sha256 of the archive. */
   archiveSha256?: string;
-  /** A2A service: GitHub repo `owner/name`. */
+  /** GitHub repo `owner/name`. */
   githubRepo?: string;
-  /** A2A service: git ref (branch/tag/sha). */
+  /** Git ref (branch/tag/sha). */
   githubRef?: string;
-  /** A2A service: subdirectory inside the repo/zip. */
+  /** Subdirectory inside the repo/zip. */
   githubPath?: string;
-  /** A2A service: local filesystem path (dev catalog). */
+  /** Local filesystem path (dev catalog / link). */
   localPath?: string;
-  /** Absolute raw URL of the entry's icon, when the registry provides one. */
+  /** Absolute URL of the entry's icon. */
   icon?: string;
+  /** Routing hint from marketplace. */
+  when_to_use?: string;
+  invocation?: "in_process" | "delegate" | "open_ui";
+  /** Marketplace pricing; paid installs require entitlement. */
+  pricing?: {
+    model: "free" | "paid" | "subscription";
+    priceId?: string;
+  };
 }
 
 export interface RegistryCatalog {
@@ -49,6 +58,8 @@ export interface RegistryCatalog {
   agents: RegistryItem[];
   workflows: RegistryItem[];
   a2aServices: RegistryItem[];
+  plugins: RegistryItem[];
+  apps: RegistryItem[];
 }
 
 export interface InstalledRegistry {
@@ -56,6 +67,8 @@ export interface InstalledRegistry {
   mcps: string[];
   workflows: string[];
   a2aServices: string[];
+  plugins: string[];
+  apps: string[];
 }
 
 /** One labeled row in a structured (non-prose) detail view. */

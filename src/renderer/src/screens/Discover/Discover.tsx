@@ -5,17 +5,17 @@ import {
   Download,
   Check,
   X,
-  Plus,
   Trash,
   ExternalLink,
   Puzzle,
   Plug,
   Bot,
   Workflow as WorkflowIcon,
-  Sparkles,
 } from "../../assets/icons";
 import type { LucideIcon } from "lucide-react";
+import { Blocks as BlocksIcon, AppWindow as AppWindowIcon } from "lucide-react";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
+import HermesAccountModal from "../../components/HermesAccountModal";
 import { useI18n } from "../../components/useI18n";
 import { OrbLoader } from "../../components/OrbLoader";
 import type {
@@ -24,6 +24,7 @@ import type {
   RegistryCatalog,
   RegistryDetail,
 } from "../../../../shared/registry";
+import type { HermesAccount } from "../../../../shared/account";
 
 interface DiscoverProps {
   profile?: string;
@@ -34,22 +35,25 @@ interface DiscoverProps {
   focusKind?: { kind: RegistryKind; nonce: number };
 }
 
+/** Discover marketplace tabs — Agents = A2A packages in hermes-ecosystem. */
 const KINDS: { key: RegistryKind; icon: LucideIcon }[] = [
   { key: "skills", icon: Puzzle },
   { key: "mcps", icon: Plug },
-  { key: "agents", icon: Bot },
+  { key: "a2aServices", icon: Bot },
   { key: "workflows", icon: WorkflowIcon },
-  { key: "a2aServices", icon: Sparkles },
+  { key: "plugins", icon: BlocksIcon },
+  { key: "apps", icon: AppWindowIcon },
 ];
 
-// Per-kind setup action: distinct icon + i18n group so each card reads clearly
-// (Install a skill/mcp/workflow, Create an agent profile).
+// Per-kind setup action: distinct icon + i18n group so each card reads clearly.
 const ACTION: Record<RegistryKind, { icon: LucideIcon; i18n: string }> = {
   skills: { icon: Download, i18n: "install" },
   mcps: { icon: Download, i18n: "install" },
-  agents: { icon: Plus, i18n: "create" },
+  agents: { icon: Download, i18n: "install" },
   workflows: { icon: Download, i18n: "install" },
   a2aServices: { icon: Download, i18n: "install" },
+  plugins: { icon: Download, i18n: "install" },
+  apps: { icon: Download, i18n: "install" },
 };
 
 const EMPTY: RegistryCatalog = {
@@ -58,6 +62,8 @@ const EMPTY: RegistryCatalog = {
   agents: [],
   workflows: [],
   a2aServices: [],
+  plugins: [],
+  apps: [],
 };
 
 type ActionState = "idle" | "working" | "done" | "error";
@@ -69,6 +75,10 @@ export default function Discover({
 }: DiscoverProps): React.JSX.Element {
   const { t } = useI18n();
   const [tab, setTab] = useState<RegistryKind>("skills");
+  const [catalog, setCatalog] = useState<RegistryCatalog>(EMPTY);
+  const [catalogOpenUrl, setCatalogOpenUrl] = useState(
+    "https://github.com/hermesonehq/hermes-registry",
+  );
 
   // "Browse" from the Capabilities screen focuses the matching Discover tab.
   // Guarded so normal mounts (no focus request) aren't forced.
@@ -76,7 +86,13 @@ export default function Discover({
     if (!focusKind) return;
     setTab(focusKind.kind);
   }, [focusKind]);
-  const [catalog, setCatalog] = useState<RegistryCatalog>(EMPTY);
+
+  useEffect(() => {
+    void window.hermesAPI.getCatalogOpenUrl?.().then((url) => {
+      if (url?.trim()) setCatalogOpenUrl(url.trim());
+    });
+  }, []);
+
   // Skills shipped with the hermes-agent repo, folded into the skills list
   // alongside registry skills (deduped).
   const [bundledSkills, setBundledSkills] = useState<RegistryItem[]>([]);
@@ -86,7 +102,17 @@ export default function Discover({
     workflows: string[];
     agents: string[];
     a2aServices: string[];
-  }>({ skills: [], mcps: [], workflows: [], agents: [], a2aServices: [] });
+    plugins: string[];
+    apps: string[];
+  }>({
+    skills: [],
+    mcps: [],
+    workflows: [],
+    agents: [],
+    a2aServices: [],
+    plugins: [],
+    apps: [],
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -101,21 +127,48 @@ export default function Discover({
   const [detailLoading, setDetailLoading] = useState(false);
   // Confirm step before removing an installed item from the detail dialog.
   const [confirmUninstall, setConfirmUninstall] = useState(false);
+  const [account, setAccount] = useState<HermesAccount | null>(null);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [pendingPurchase, setPendingPurchase] = useState<{
+    kind: RegistryKind;
+    item: RegistryItem;
+  } | null>(null);
+  const [appRunning, setAppRunning] = useState<Record<string, boolean>>({});
+  const [appBusy, setAppBusy] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    void window.hermesAPI.getAccount(profile).then(setAccount).catch(() => {
+      setAccount(null);
+    });
+  }, [profile]);
 
   const loadInstalled = useCallback(async () => {
     try {
-      const [reg, profiles, skills] = await Promise.all([
+      const [reg, skills] = await Promise.all([
         window.hermesAPI.listInstalledRegistry(profile),
-        window.hermesAPI.listProfiles(),
         window.hermesAPI.listInstalledSkills(profile),
       ]);
+      const apps = reg.apps ?? [];
       setInstalled({
         skills: skills.map((s) => s.name),
         mcps: reg.mcps,
         workflows: reg.workflows,
-        agents: profiles.map((p) => p.id),
+        agents: [],
         a2aServices: reg.a2aServices ?? [],
+        plugins: reg.plugins ?? [],
+        apps,
       });
+      const running: Record<string, boolean> = {};
+      await Promise.all(
+        apps.map(async (id) => {
+          try {
+            running[id] = await window.hermesAPI.isEcosystemAppRunning(id);
+          } catch {
+            running[id] = false;
+          }
+        }),
+      );
+      setAppRunning(running);
     } catch {
       /* leave as-is */
     }
@@ -137,6 +190,8 @@ export default function Discover({
           agents: data.agents ?? [],
           workflows: data.workflows ?? [],
           a2aServices: data.a2aServices ?? [],
+          plugins: data.plugins ?? [],
+          apps: data.apps ?? [],
         });
         // `source: name` so the existing install path runs
         // `hermes skills install <name>`.
@@ -196,6 +251,10 @@ export default function Discover({
           return installed.workflows.includes(item.id);
         case "a2aServices":
           return installed.a2aServices.includes(item.id);
+        case "plugins":
+          return installed.plugins.includes(item.id);
+        case "apps":
+          return installed.apps.includes(item.id);
         default:
           return false;
       }
@@ -260,11 +319,50 @@ export default function Discover({
     return (catalog[key] ?? []).length;
   }
 
+  function pricingBadge(item: RegistryItem): string | null {
+    const model = item.pricing?.model;
+    if (model === "paid") return t("discover.paid");
+    if (model === "subscription") return t("discover.subscription");
+    return null;
+  }
+
+  function isPaidItem(item: RegistryItem): boolean {
+    const model = item.pricing?.model;
+    return model === "paid" || model === "subscription";
+  }
+
+  function installButtonLabel(
+    kind: RegistryKind,
+    item: RegistryItem,
+    state: ActionState,
+  ): string {
+    const action = ACTION[kind];
+    if (state === "working") {
+      return isPaidItem(item)
+        ? t("discover.buying")
+        : t(`discover.actions.${action.i18n}.working`);
+    }
+    if (isPaidItem(item) && !account) return t("discover.signInToBuy");
+    if (isPaidItem(item)) return t("discover.buyAndInstall");
+    return t(`discover.actions.${action.i18n}.setup`);
+  }
+
   async function handleInstall(
     kind: RegistryKind,
     item: RegistryItem,
+    opts: { skipAccountGate?: boolean } = {},
   ): Promise<void> {
     const key = `${kind}:${item.id}`;
+    if (isPaidItem(item) && !account && !opts.skipAccountGate) {
+      setPendingPurchase({ kind, item });
+      setShowAccountModal(true);
+      setActionError((e) => ({
+        ...e,
+        [key]: t("discover.signInToBuy"),
+      }));
+      return;
+    }
+
     setActions((a) => ({ ...a, [key]: "working" }));
     setActionError((e) => {
       const next = { ...e };
@@ -282,7 +380,16 @@ export default function Discover({
         await loadInstalled();
       } else {
         setActions((a) => ({ ...a, [key]: "error" }));
-        if (res.error) setActionError((e) => ({ ...e, [key]: res.error! }));
+        if (res.code === "needs_sign_in") {
+          setPendingPurchase({ kind, item });
+          setShowAccountModal(true);
+          setActionError((e) => ({
+            ...e,
+            [key]: res.error || t("discover.signInToBuy"),
+          }));
+        } else if (res.error) {
+          setActionError((e) => ({ ...e, [key]: res.error! }));
+        }
       }
     } catch (err) {
       setActions((a) => ({ ...a, [key]: "error" }));
@@ -293,13 +400,11 @@ export default function Discover({
     }
   }
 
-  // Remove an installed item. Only MCP servers support removal today
-  // (delete the server block from the active profile's config.yaml).
+  // Remove an installed item (ecosystem packages + MCP config + A2A agents).
   async function handleUninstall(
     kind: RegistryKind,
     item: RegistryItem,
   ): Promise<void> {
-    if (kind !== "mcps") return;
     const key = `${kind}:${item.id}`;
     setActions((a) => ({ ...a, [key]: "working" }));
     setActionError((e) => {
@@ -308,10 +413,15 @@ export default function Discover({
       return next;
     });
     try {
-      const res = await window.hermesAPI.removeMcpServer(item.id, profile);
+      const res = await window.hermesAPI.uninstallRegistryItem(
+        kind,
+        item,
+        profile,
+      );
       if (res.success) {
         setActions((a) => ({ ...a, [key]: "idle" }));
         setConfirmUninstall(false);
+        setDetailItem(null);
         await loadInstalled();
       } else {
         setActions((a) => ({ ...a, [key]: "error" }));
@@ -324,6 +434,22 @@ export default function Discover({
         [key]: err instanceof Error ? err.message : "Failed",
       }));
     }
+  }
+
+  async function handleLinkLocal(): Promise<void> {
+    const picked = await window.hermesAPI.selectFolder();
+    if (!picked) return;
+    const folderName =
+      picked.replace(/\\/g, "/").split("/").pop() || "local-package";
+    const item: RegistryItem = {
+      id: folderName,
+      name: folderName,
+      description: "",
+      localPath: picked,
+    };
+    const res = await window.hermesAPI.installRegistryItem(tab, item, profile);
+    if (res.success) await loadInstalled();
+    else setError(res.error || "Link failed");
   }
 
   async function openItemDetail(
@@ -341,6 +467,17 @@ export default function Discover({
       setDetailData({ description: item.description });
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function onAccountSignedIn(): Promise<void> {
+    const next = await window.hermesAPI.getAccount(profile).catch(() => null);
+    setAccount(next);
+    setShowAccountModal(false);
+    const pending = pendingPurchase;
+    setPendingPurchase(null);
+    if (pending) {
+      await handleInstall(pending.kind, pending.item, { skipAccountGate: true });
     }
   }
 
@@ -375,11 +512,18 @@ export default function Discover({
                       <KindIcon size={18} className="discover-card-icon" />
                       {item.name}
                     </div>
-                    {item.category && (
-                      <span className="discover-card-badge">
-                        {item.category}
-                      </span>
-                    )}
+                    <span className="discover-card-badges">
+                      {pricingBadge(item) && (
+                        <span className="discover-card-badge discover-card-badge--paid">
+                          {pricingBadge(item)}
+                        </span>
+                      )}
+                      {item.category && (
+                        <span className="discover-card-badge">
+                          {item.category}
+                        </span>
+                      )}
+                    </span>
                   </div>
                   <div className="discover-modal-actions">
                     {done ? (
@@ -388,7 +532,7 @@ export default function Discover({
                           <Check size={14} />
                           {t(`discover.actions.${act.i18n}.done`)}
                         </span>
-                        {kind === "mcps" &&
+                        {kind !== "agents" &&
                           (confirmUninstall ? (
                             <>
                               <button
@@ -427,12 +571,14 @@ export default function Discover({
                         className="btn btn-primary btn-sm"
                         onClick={() => handleInstall(kind, item)}
                         disabled={itemState === "working"}
-                        title={t("discover.targetProfile")}
+                        title={
+                          isPaidItem(item)
+                            ? t("discover.buyAndInstall")
+                            : t("discover.targetProfile")
+                        }
                       >
                         <ActionIcon size={14} />
-                        {itemState === "working"
-                          ? t(`discover.actions.${act.i18n}.working`)
-                          : t(`discover.actions.${act.i18n}.setup`)}
+                        {installButtonLabel(kind, item, itemState)}
                       </button>
                     )}
                     {item.homepage && (
@@ -524,11 +670,11 @@ export default function Discover({
           <p className="discover-subtitle">{t("discover.subtitle")}</p>
         </div>
         <a
-          href="https://github.com/hermesonehq/hermes-registry"
+          href={catalogOpenUrl}
           target="_blank"
           rel="noreferrer"
           className="btn btn-secondary btn-sm"
-          title="Open Registry on GitHub"
+          title={catalogOpenUrl}
         >
           <ExternalLink size={14} />
           Open Registry
@@ -561,6 +707,14 @@ export default function Discover({
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => void handleLinkLocal()}
+          disabled={loading || tab === "agents"}
+          title={t("discover.linkLocal")}
+        >
+          {t("discover.linkLocal")}
+        </button>
         <button
           className="btn btn-secondary btn-sm"
           onClick={() => load(true)}
@@ -627,9 +781,16 @@ export default function Discover({
                     <ActiveIcon size={16} />
                   </span>
                   <span className="discover-card-name">{item.name}</span>
-                  {item.category && (
-                    <span className="discover-card-badge">{item.category}</span>
-                  )}
+                  <span className="discover-card-badges">
+                    {pricingBadge(item) && (
+                      <span className="discover-card-badge discover-card-badge--paid">
+                        {pricingBadge(item)}
+                      </span>
+                    )}
+                    {item.category && (
+                      <span className="discover-card-badge">{item.category}</span>
+                    )}
+                  </span>
                 </div>
                 {meta.length > 0 && (
                   <div className="discover-card-meta">{meta.join(" · ")}</div>
@@ -649,10 +810,66 @@ export default function Discover({
                 )}
                 <div className="discover-card-footer">
                   {done ? (
-                    <span className="discover-card-installed">
-                      <Check size={14} />
-                      {t(`discover.actions.${action.i18n}.done`)}
-                    </span>
+                    <>
+                      <span className="discover-card-installed">
+                        <Check size={14} />
+                        {t(`discover.actions.${action.i18n}.done`)}
+                      </span>
+                      {tab === "apps" && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm discover-install-btn"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setAppBusy((prev) => ({
+                              ...prev,
+                              [item.id]: true,
+                            }));
+                            try {
+                              if (appRunning[item.id]) {
+                                await window.hermesAPI.stopEcosystemApp(
+                                  item.id,
+                                );
+                                setAppRunning((prev) => ({
+                                  ...prev,
+                                  [item.id]: false,
+                                }));
+                              } else {
+                                const res =
+                                  await window.hermesAPI.startEcosystemApp(
+                                    item.id,
+                                  );
+                                if (!res.success) {
+                                  setActionError((prev) => ({
+                                    ...prev,
+                                    [key]: res.error || "Start failed",
+                                  }));
+                                } else {
+                                  setAppRunning((prev) => ({
+                                    ...prev,
+                                    [item.id]: true,
+                                  }));
+                                }
+                              }
+                            } finally {
+                              setAppBusy((prev) => ({
+                                ...prev,
+                                [item.id]: false,
+                              }));
+                            }
+                          }}
+                          disabled={!!appBusy[item.id]}
+                        >
+                          {appBusy[item.id]
+                            ? appRunning[item.id]
+                              ? t("discover.stoppingApp")
+                              : t("discover.startingApp")
+                            : appRunning[item.id]
+                              ? t("discover.stopApp")
+                              : t("discover.startApp")}
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <button
                       type="button"
@@ -665,9 +882,7 @@ export default function Discover({
                       title={t("discover.targetProfile")}
                     >
                       <ActionIcon size={14} />
-                      {state === "working"
-                        ? t(`discover.actions.${action.i18n}.working`)
-                        : t(`discover.actions.${action.i18n}.setup`)}
+                      {installButtonLabel(tab, item, state)}
                     </button>
                   )}
                 </div>
@@ -675,6 +890,19 @@ export default function Discover({
             );
           })}
         </div>
+      )}
+
+      {showAccountModal && (
+        <HermesAccountModal
+          profile={profile}
+          onClose={() => {
+            setShowAccountModal(false);
+            setPendingPurchase(null);
+          }}
+          onSignedIn={() => {
+            void onAccountSignedIn();
+          }}
+        />
       )}
     </div>
   );

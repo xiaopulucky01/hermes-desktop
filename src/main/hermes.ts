@@ -88,6 +88,7 @@ import {
   hostDerivedEnvKeyForUrl,
   shouldPruneOpenRouterApiKey,
 } from "./host-derived-env";
+import { capabilityRouterSystemMessage } from "./ecosystem/router";
 
 /**
  * Resolve which profile a gateway call targets. An explicit profile always
@@ -1189,6 +1190,31 @@ export function contextFolderSystemMessage(
   };
 }
 
+/**
+ * Rank installed ecosystem capabilities for this turn and return a system
+ * message the agent can use to pick skills/MCPs/agents. Null when nothing matches.
+ */
+// @lat: [[lat.md/ecosystem#Hermes ecosystem#Capability router]]
+export { capabilityRouterSystemMessage };
+
+/** Prepend request-scoped system messages (folder + capability router). */
+export function prependRequestSystemMessages(
+  messages: Array<{ role: string; content: unknown }>,
+  opts: { contextFolder?: string; userMessage?: string },
+): void {
+  const router = capabilityRouterSystemMessage(opts.userMessage);
+  if (router) messages.unshift(router);
+  const ctx = contextFolderSystemMessage(opts.contextFolder);
+  if (ctx) messages.unshift(ctx);
+}
+
+function mergeInstructions(
+  ...parts: Array<string | null | undefined>
+): string | undefined {
+  const joined = parts.filter((p) => !!p?.trim()).join("\n\n");
+  return joined || undefined;
+}
+
 function reasoningEffortForProfile(
   profile?: string,
 ): "minimal" | "low" | "medium" | "high" | "xhigh" | null {
@@ -1233,13 +1259,12 @@ function sendMessageViaApi(
   const userContent = buildUserContent(message, attachments);
   messages.push({ role: "user", content: userContent });
 
-  // Context folder (issue #27): when the conversation is bound to a working
-  // folder, prepend a system message so the agent scopes file/terminal work
-  // there. Injected only at the request-build step — the renderer's visible
-  // transcript stays clean, and getSessionMessages filters non-user/assistant
-  // roles, so reloaded sessions stay clean too.
-  const ctxSystem = contextFolderSystemMessage(contextFolder);
-  if (ctxSystem) messages.unshift(ctxSystem);
+  // Context folder (issue #27) + capability router: request-scoped system
+  // messages only — the visible transcript stays clean.
+  prependRequestSystemMessages(messages, {
+    contextFolder,
+    userMessage: message,
+  });
 
   const reasoningEffort = reasoningEffortForProfile(profile);
   const bodyObj: Record<string, unknown> = {
@@ -1634,6 +1659,7 @@ function sendMessageViaRuns(
     resumeSessionId ||
     (headersForAuth.Authorization ? `desk-${Date.now()}-${randomUUID()}` : "");
   const ctxSystem = contextFolderSystemMessage(contextFolder);
+  const routerSystem = capabilityRouterSystemMessage(message);
   const bodyObj: Record<string, unknown> = {
     model: mc.model || "hermes-agent",
     input: message,
@@ -1642,7 +1668,11 @@ function sendMessageViaRuns(
   const reasoningEffort = reasoningEffortForProfile(profile);
   if (reasoningEffort) bodyObj.reasoning_effort = reasoningEffort;
   if (sessionId) bodyObj.session_id = sessionId;
-  if (ctxSystem) bodyObj.instructions = ctxSystem.content;
+  const instructions = mergeInstructions(
+    ctxSystem?.content,
+    routerSystem?.content,
+  );
+  if (instructions) bodyObj.instructions = instructions;
   const bodyBuf = Buffer.from(JSON.stringify(bodyObj), "utf-8");
   const headers = getJsonApiHeaders(profile, bodyBuf);
   if (sessionId) {
@@ -2207,9 +2237,11 @@ async function sendMessageViaTuiGateway(
     }
 
     promptSubmitted = true;
+    const routerHint = capabilityRouterSystemMessage(message);
     await client.request("prompt.submit", {
       session_id: activeSessionId,
       text: message,
+      ...(routerHint ? { instructions: routerHint.content } : {}),
     });
   } catch (error) {
     cleanup();

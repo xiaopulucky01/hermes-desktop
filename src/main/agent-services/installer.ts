@@ -140,10 +140,10 @@ export function ensureSharedVenv(workDir?: string): string {
     throw new Error(`Failed to create shared-venv at ${root}`);
   }
 
-  // Optional baseline requirements next to shared-venv (dev repo) or sibling.
+  // Optional baseline requirements under ecosystem runtimes or desktop resources.
   const reqCandidates = [
     join(root, "..", "requirements-shared.txt"),
-    join(process.cwd(), "../agent-services/requirements-shared.txt"),
+    join(process.cwd(), "../hermes-ecosystem/runtimes/python/requirements-shared.txt"),
     join(process.cwd(), "resources/agent-services-requirements-shared.txt"),
   ];
   for (const req of reqCandidates) {

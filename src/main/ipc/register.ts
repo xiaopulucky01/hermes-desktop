@@ -319,9 +319,19 @@ import {
   fetchRegistryDetail,
   listInstalledRegistry,
   installRegistryItem,
+  uninstallRegistryItem,
+  linkLocalEcosystemPackage,
+  getCatalogOpenUrl,
   type RegistryKind,
   type RegistryItem,
 } from "../registry";
+import { getEcosystemRoot } from "../ecosystem/paths";
+import {
+  gcUnusedRuntimes,
+  listRuntimePools,
+  rankCapabilities,
+  formatRouterHint,
+} from "../ecosystem";
 import {
   listInstalledSkills,
   listBundledSkills,
@@ -3188,6 +3198,59 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, kind: RegistryKind, item: RegistryItem, profile?: string) =>
       installRegistryItem(kind, item, profile),
   );
+  ipcMain.handle(
+    "registry-purchase",
+    (_event, item: RegistryItem, profile?: string) =>
+      import("../ecosystem/entitlements").then(({ purchaseRegistryItem }) =>
+        purchaseRegistryItem(item, { profile }),
+      ),
+  );
+  ipcMain.handle("ecosystem-app-start", (_event, appId: string) =>
+    import("../ecosystem/apps-launcher").then(({ startEcosystemApp }) =>
+      startEcosystemApp(appId),
+    ),
+  );
+  ipcMain.handle("ecosystem-app-stop", (_event, appId: string) =>
+    import("../ecosystem/apps-launcher").then(({ stopEcosystemApp }) =>
+      stopEcosystemApp(appId),
+    ),
+  );
+  ipcMain.handle("ecosystem-app-running", (_event, appId: string) =>
+    import("../ecosystem/apps-launcher").then(({ isEcosystemAppRunning }) =>
+      isEcosystemAppRunning(appId),
+    ),
+  );
+  ipcMain.handle(
+    "registry-uninstall",
+    (_event, kind: RegistryKind, item: RegistryItem, profile?: string) =>
+      uninstallRegistryItem(kind, item, profile),
+  );
+  ipcMain.handle(
+    "ecosystem-link-local",
+    (
+      _event,
+      kind: string,
+      localPath: string,
+      opts?: { id?: string; name?: string; profile?: string },
+    ) =>
+      linkLocalEcosystemPackage(
+        kind as import("../../shared/ecosystem").EcosystemPackageKind,
+        localPath,
+        opts ?? {},
+      ),
+  );
+  ipcMain.handle("ecosystem-get-root", () => getEcosystemRoot());
+  ipcMain.handle("ecosystem-list-runtimes", () => listRuntimePools());
+  ipcMain.handle("ecosystem-gc-runtimes", () => gcUnusedRuntimes());
+  ipcMain.handle(
+    "ecosystem-rank-capabilities",
+    (_event, query: string, limit?: number) => rankCapabilities(query, limit),
+  );
+  ipcMain.handle(
+    "ecosystem-router-hint",
+    (_event, query: string, limit?: number) => formatRouterHint(query, limit),
+  );
+  ipcMain.handle("catalog-open-url", () => getCatalogOpenUrl());
 
   // Memory providers
   ipcMain.handle("discover-memory-providers", (_event, profile?: string) => {

@@ -25,7 +25,7 @@ export default {
   },
   agentServices: {
     intro:
-      "Installed A2A agents share agent-services shared-venv and each get their own port. Hermes delegates over A2A — you do not need to call tools by name.",
+      "Installed A2A agents share hermes-ecosystem shared-venv and each get their own port. Hermes delegates over A2A — you do not need to call tools by name.",
     cardTitle: "Installed agents",
     cardSubtitle: "Local A2A services supervised by Hermes",
     count: "{{count}} installed",

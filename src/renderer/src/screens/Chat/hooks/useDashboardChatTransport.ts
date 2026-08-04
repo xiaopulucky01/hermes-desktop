@@ -180,6 +180,8 @@ export async function submitDashboardPromptWithRecovery(
     sessionId: string;
     storedSessionId?: string | null;
     text: string;
+    /** Ephemeral turn instructions (capability router); not user transcript. */
+    instructions?: string;
     /** Scopes the turn to this profile on the UNIFIED machine dashboard. Without
      *  it, prompt.submit runs in the dashboard's launch profile (default), so a
      *  named profile's chat would answer as `default`. session create/resume
@@ -191,10 +193,14 @@ export async function submitDashboardPromptWithRecovery(
     params.profile && params.profile !== "default"
       ? { profile: params.profile }
       : {};
+  const instructionsParam = params.instructions?.trim()
+    ? { instructions: params.instructions.trim() }
+    : {};
   try {
     await client.request("prompt.submit", {
       session_id: params.sessionId,
       text: params.text,
+      ...instructionsParam,
       ...profileParam,
     });
     return params.sessionId;
@@ -216,6 +222,7 @@ export async function submitDashboardPromptWithRecovery(
     await client.request("prompt.submit", {
       session_id: recoveredSessionId,
       text: params.text,
+      ...instructionsParam,
       ...profileParam,
     });
     return recoveredSessionId;
@@ -1620,10 +1627,24 @@ export function useDashboardChatTransport({
           dashboardText,
           syncedAttachments.refs,
         );
+        // Prefer ephemeral `instructions` so the router hint is not persisted
+        // as user text in the gateway session. Unknown fields are ignored by
+        // older gateways — routing then falls back to default LLM selection.
+        let instructions: string | undefined;
+        try {
+          const hint = await window.hermesAPI.formatRouterHint?.(
+            typeof dashboardText === "string" ? dashboardText : text,
+            3,
+          );
+          if (hint?.trim()) instructions = hint.trim();
+        } catch {
+          /* ignore router failures */
+        }
         await submitDashboardPromptWithRecovery(client, {
           sessionId: selectedSessionId,
           storedSessionId: storedSessionIdRef.current,
           text: submitText,
+          instructions,
           profile,
           onRecoveredSessionId: (recoveredSessionId) => {
             runtimeSessionIdRef.current = recoveredSessionId;

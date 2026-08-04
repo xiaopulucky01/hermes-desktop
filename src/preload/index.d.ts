@@ -1402,6 +1402,8 @@ interface HermesAPI {
     mcps: string[];
     workflows: string[];
     a2aServices: string[];
+    plugins: string[];
+    apps: string[];
   }>;
   fetchRegistryDetail: (
     kind: RegistryKind,
@@ -1411,7 +1413,65 @@ interface HermesAPI {
     kind: RegistryKind,
     item: RegistryItem,
     profile?: string,
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    code?: "needs_sign_in" | "needs_entitlement" | "checkout_failed";
+  }>;
+  purchaseRegistryItem: (
+    item: RegistryItem,
+    profile?: string,
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    checkoutId?: string;
+    code?: "needs_sign_in" | "checkout_failed";
+  }>;
+  startEcosystemApp: (
+    appId: string,
+  ) => Promise<{ success: boolean; error?: string; pid?: number }>;
+  stopEcosystemApp: (
+    appId: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  isEcosystemAppRunning: (appId: string) => Promise<boolean>;
+  uninstallRegistryItem: (
+    kind: RegistryKind,
+    item: RegistryItem,
+    profile?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  linkLocalEcosystemPackage: (
+    kind: string,
+    localPath: string,
+    opts?: { id?: string; name?: string; profile?: string },
+  ) => Promise<{ success: boolean; error?: string }>;
+  getEcosystemRoot: () => Promise<string>;
+  listEcosystemRuntimes: () => Promise<
+    Record<
+      string,
+      {
+        runtime: string;
+        lockHash: string;
+        lockFile: string;
+        path: string;
+        refs: string[];
+      }
+    >
+  >;
+  gcEcosystemRuntimes: () => Promise<{ removed: string[] }>;
+  rankCapabilities: (
+    query: string,
+    limit?: number,
+  ) => Promise<
+    Array<{
+      kind: string;
+      id: string;
+      name: string;
+      score: number;
+      when_to_use?: string;
+    }>
+  >;
+  formatRouterHint: (query: string, limit?: number) => Promise<string | null>;
+  getCatalogOpenUrl: () => Promise<string>;
 
   // Log viewer
   readLogs: (

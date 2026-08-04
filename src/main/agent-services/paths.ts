@@ -1,26 +1,36 @@
 import { existsSync } from "fs";
 import { join, resolve } from "path";
-import { HERMES_HOME } from "../installer";
+import {
+  ecosystemSharedPythonVenvRoot,
+  resolveAgentServicesRoot,
+} from "../ecosystem/paths";
 
-/** User-writable root for cloud-downloaded and locally registered A2A agent services. */
+/**
+ * User-writable root for A2A agent services: `<hermes-ecosystem>/agents`.
+ * Override with HERMES_AGENT_SERVICES_ROOT. No HERMES_HOME fallback.
+ */
 // @lat: [[lat.md/agent-services#Agent services]]
-export const AGENT_SERVICES_ROOT =
-  process.env.HERMES_AGENT_SERVICES_ROOT?.trim() ||
-  join(HERMES_HOME, "agent-services");
+// @lat: [[lat.md/ecosystem#Hermes ecosystem#Agents root]]
+export function getAgentServicesRoot(): string {
+  return resolveAgentServicesRoot();
+}
 
-/** Directory name for the multi-agent shared venv under AGENT_SERVICES_ROOT. */
+/** Resolved once at import — prefer [[getAgentServicesRoot]] when env may change. */
+export const AGENT_SERVICES_ROOT = resolveAgentServicesRoot();
+
+/** Directory name for the multi-agent shared venv under runtimes (legacy name). */
 export const SHARED_VENV_DIRNAME = "shared-venv";
 
 export function agentServicesCatalogPath(): string {
-  return join(AGENT_SERVICES_ROOT, "catalog.json");
+  return join(getAgentServicesRoot(), "catalog.json");
 }
 
 export function agentServicesCacheDir(): string {
-  return join(AGENT_SERVICES_ROOT, "cache");
+  return join(getAgentServicesRoot(), "cache");
 }
 
 export function agentServicesInstalledRoot(): string {
-  return join(AGENT_SERVICES_ROOT, "installed");
+  return join(getAgentServicesRoot(), "installed");
 }
 
 export function agentServiceInstalledDir(id: string): string {
@@ -44,8 +54,9 @@ export function agentServiceLogsDir(id: string): string {
 }
 
 /**
- * Root directory of the shared multi-agent venv (never Hermes resources/python).
- * Override with HERMES_AGENT_SERVICES_SHARED_VENV.
+ * Shared multi-agent venv root (never Hermes resources/python).
+ * Override with HERMES_AGENT_SERVICES_SHARED_VENV; else ecosystem
+ * `runtimes/python/shared-venv` (from workDir under hermes-ecosystem, or default).
  */
 export function resolveSharedVenvRoot(workDir?: string): string {
   // @lat: [[lat.md/agent-services#Agent services#Shared Python runtime#Shared venv path]]
@@ -54,17 +65,19 @@ export function resolveSharedVenvRoot(workDir?: string): string {
 
   if (workDir) {
     const normalized = workDir.replace(/\\/g, "/");
-    const idx = normalized.toLowerCase().lastIndexOf("/agent-services/agents/");
-    if (idx >= 0) {
-      const repoServices = normalized.slice(0, idx + "/agent-services".length);
+    const idxEco = normalized.toLowerCase().lastIndexOf("/hermes-ecosystem/");
+    if (idxEco >= 0) {
+      const ecoRoot = normalized.slice(0, idxEco + "/hermes-ecosystem".length);
       return resolve(
-        repoServices.replace(/\//g, process.platform === "win32" ? "\\" : "/"),
+        ecoRoot.replace(/\//g, process.platform === "win32" ? "\\" : "/"),
+        "runtimes",
+        "python",
         SHARED_VENV_DIRNAME,
       );
     }
   }
 
-  return join(AGENT_SERVICES_ROOT, SHARED_VENV_DIRNAME);
+  return ecosystemSharedPythonVenvRoot();
 }
 
 export function sharedVenvPythonCandidates(venvRoot: string): string[] {

@@ -57,6 +57,15 @@ describe("resolveSharedVenvRoot", () => {
     expect(root.toLowerCase()).toContain("/agent-services/shared-venv");
   });
 
+  it("resolves under hermes-ecosystem runtimes when workDir is under ecosystem", () => {
+    const work =
+      "D:/Project/private/hermes-ecosystem/agents/installed/research-agent";
+    const root = resolveSharedVenvRoot(work).replace(/\\/g, "/");
+    expect(root.toLowerCase()).toContain(
+      "/hermes-ecosystem/runtimes/python/shared-venv",
+    );
+  });
+
   it("honors HERMES_AGENT_SERVICES_SHARED_VENV override", () => {
     const prev = process.env.HERMES_AGENT_SERVICES_SHARED_VENV;
     process.env.HERMES_AGENT_SERVICES_SHARED_VENV = "D:/custom/shared-venv";
@@ -76,7 +85,8 @@ describe("resolvePythonArgv0 shared", () => {
   beforeEach(() => {
     workDir = join(
       tmpdir(),
-      `agent-services-${Date.now()}`,
+      `as-root-${Date.now()}`,
+      "agent-services",
       "agents",
       "research-agent",
     );
@@ -88,7 +98,7 @@ describe("resolvePythonArgv0 shared", () => {
   });
 
   afterEach(() => {
-    rmSync(join(workDir, "..", ".."), { recursive: true, force: true });
+    rmSync(join(workDir, "..", "..", ".."), { recursive: true, force: true });
   });
 
   // @lat: [[lat.md/agent-services#Agent services#Shared Python runtime#Resolve shared python]]

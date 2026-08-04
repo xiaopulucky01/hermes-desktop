@@ -12911,6 +12911,18 @@ body:has(.shell-vibrant),
   padding: 2px 8px;
 }
 
+.discover-card-badge--paid {
+  color: var(--warning-text, #a16207);
+  background: color-mix(in srgb, var(--warning, #eab308) 18%, transparent);
+}
+
+.discover-card-badges {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  align-items: center;
+}
+
 .discover-card-meta {
   font-size: 11px;
   color: var(--text-muted);

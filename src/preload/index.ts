@@ -1839,8 +1839,77 @@ const hermesAPI = {
     kind: string,
     item: unknown,
     profile?: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    code?: "needs_sign_in" | "needs_entitlement" | "checkout_failed";
+  }> => ipcRenderer.invoke("registry-install", kind, item, profile),
+  purchaseRegistryItem: (
+    item: unknown,
+    profile?: string,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    checkoutId?: string;
+    code?: "needs_sign_in" | "checkout_failed";
+  }> => ipcRenderer.invoke("registry-purchase", item, profile),
+  startEcosystemApp: (
+    appId: string,
+  ): Promise<{ success: boolean; error?: string; pid?: number }> =>
+    ipcRenderer.invoke("ecosystem-app-start", appId),
+  stopEcosystemApp: (
+    appId: string,
   ): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke("registry-install", kind, item, profile),
+    ipcRenderer.invoke("ecosystem-app-stop", appId),
+  isEcosystemAppRunning: (appId: string): Promise<boolean> =>
+    ipcRenderer.invoke("ecosystem-app-running", appId),
+  uninstallRegistryItem: (
+    kind: string,
+    item: unknown,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("registry-uninstall", kind, item, profile),
+  linkLocalEcosystemPackage: (
+    kind: string,
+    localPath: string,
+    opts?: { id?: string; name?: string; profile?: string },
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("ecosystem-link-local", kind, localPath, opts),
+  getEcosystemRoot: (): Promise<string> =>
+    ipcRenderer.invoke("ecosystem-get-root"),
+  listEcosystemRuntimes: (): Promise<
+    Record<
+      string,
+      {
+        runtime: string;
+        lockHash: string;
+        lockFile: string;
+        path: string;
+        refs: string[];
+      }
+    >
+  > => ipcRenderer.invoke("ecosystem-list-runtimes"),
+  gcEcosystemRuntimes: (): Promise<{ removed: string[] }> =>
+    ipcRenderer.invoke("ecosystem-gc-runtimes"),
+  rankCapabilities: (
+    query: string,
+    limit?: number,
+  ): Promise<
+    Array<{
+      kind: string;
+      id: string;
+      name: string;
+      score: number;
+      when_to_use?: string;
+    }>
+  > => ipcRenderer.invoke("ecosystem-rank-capabilities", query, limit),
+  formatRouterHint: (
+    query: string,
+    limit?: number,
+  ): Promise<string | null> =>
+    ipcRenderer.invoke("ecosystem-router-hint", query, limit),
+  getCatalogOpenUrl: (): Promise<string> =>
+    ipcRenderer.invoke("catalog-open-url"),
 
   // Log viewer
   readLogs: (

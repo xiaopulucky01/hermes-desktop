@@ -11,6 +11,7 @@ export type {
 export {
   AGENT_SERVICES_ROOT,
   SHARED_VENV_DIRNAME,
+  getAgentServicesRoot,
   hasSharedVenv,
   resolveSharedVenvPython,
   resolveSharedVenvRoot,

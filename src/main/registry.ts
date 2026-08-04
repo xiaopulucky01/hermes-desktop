@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, readdirSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join, resolve } from "path";
-import { profileHome, safeWriteFile } from "./utils";
-import { installSkill, listInstalledSkills } from "./skills";
+import { safeWriteFile } from "./utils";
+import { installSkill, listInstalledSkills, uninstallSkill } from "./skills";
 import { createProfile } from "./profiles";
 import { writeSoul } from "./soul";
 import { listMcpServers } from "./installer";
@@ -13,6 +13,14 @@ import {
   startAgentService,
 } from "./agent-services";
 import { scanLocalA2aAgentCatalog } from "./agent-services/local-catalog";
+import { scanLocalAppCatalog } from "./ecosystem/apps-catalog";
+import {
+  installEcosystemPackage,
+  listInstalledEcosystemIds,
+  linkLocalEcosystemPackage,
+  uninstallEcosystemPackage,
+} from "./ecosystem/installer";
+import { registryKindToPackageKind } from "../shared/ecosystem";
 import type {
   RegistryKind,
   RegistryItem,
@@ -30,12 +38,12 @@ export type {
 } from "../shared/registry";
 
 /**
- * The "Discover" marketplace reads its catalog from a public GitHub repo:
- *   https://github.com/hermesonehq/hermes-registry
+ * Discover catalog: prefer hermes-marketplace (`HERMES_CATALOG_BASE_URL`),
+ * fall back to the public GitHub hermes-registry mirror.
  *
  * `index.json` is a flat list of entries, each with a `type`
- * (agent|mcp|skill|workflow) and a `path` to its folder in the repo. "Set up"
- * actions download the entry's files into the active profile.
+ * (agent|mcp|skill|workflow|plugin|app|a2a-service). "Set up" actions install
+ * into hermes-ecosystem (agents) or the active profile (legacy skill/mcp/workflow).
  */
 const REGISTRY_REPO = "fathah/hermes-registry";
 const REGISTRY_BRANCH = "main";
@@ -44,14 +52,43 @@ const REGISTRY_REPO_BASE = `https://github.com/${REGISTRY_REPO}/tree/${REGISTRY_
 // Icons are served by the registry web service (from its DB), not raw GitHub —
 // e.g. https://registry.hermesone.org/registry-icon/mcp/aws/icon.svg.
 const REGISTRY_ICON_BASE = "https://registry.hermesone.org/registry-icon";
-const INDEX_URL = `${REGISTRY_RAW_BASE}/index.json`;
+
+/** Catalog API base (marketplace). Empty → GitHub raw fallback. */
+function catalogBaseUrl(): string {
+  return (
+    process.env.HERMES_CATALOG_BASE_URL?.trim() ||
+    process.env.MAIN_VITE_HERMES_CATALOG_BASE_URL?.trim() ||
+    ""
+  ).replace(/\/$/, "");
+}
+
+/** URL for Discover "Open Registry" — marketplace root or GitHub registry. */
+export function getCatalogOpenUrl(): string {
+  const base = catalogBaseUrl();
+  if (base) return base;
+  return `https://github.com/${REGISTRY_REPO}`;
+}
+
+function indexUrl(): string {
+  const base = catalogBaseUrl();
+  if (base) return `${base}/index.json`;
+  return `${REGISTRY_RAW_BASE}/index.json`;
+}
+
 const MODELS_URL = `${REGISTRY_RAW_BASE}/models.json`;
 const TREE_URL = `https://api.github.com/repos/${REGISTRY_REPO}/git/trees/${REGISTRY_BRANCH}?recursive=1`;
 
 /** index.json entry shape. */
 interface IndexEntry {
   id: string;
-  type: "agent" | "mcp" | "skill" | "workflow" | "a2a-service";
+  type:
+    | "agent"
+    | "mcp"
+    | "skill"
+    | "workflow"
+    | "a2a-service"
+    | "plugin"
+    | "app";
   category?: string;
   name: string;
   version?: string;
@@ -73,6 +110,12 @@ interface IndexEntry {
   local_path?: string;
   /** Repo-relative path to the entry's icon, e.g. "mcp/ableton/icon.svg". */
   icon?: string;
+  when_to_use?: string;
+  invocation?: "in_process" | "delegate" | "open_ui";
+  pricing?: {
+    model: "free" | "paid" | "subscription";
+    priceId?: string;
+  };
 }
 
 /** Per-entry manifest.json (mcp / agent / workflow / a2a-service). */
@@ -98,9 +141,12 @@ interface EntryManifest {
 const TYPE_TO_KIND: Record<IndexEntry["type"], RegistryKind> = {
   skill: "skills",
   mcp: "mcps",
-  agent: "agents",
+  // Marketplace / legacy "agent" means installable A2A agent package.
+  agent: "a2aServices",
   workflow: "workflows",
   "a2a-service": "a2aServices",
+  plugin: "plugins",
+  app: "apps",
 };
 
 // Short-lived cache so flipping between Discover sub-tabs doesn't refetch.
@@ -138,7 +184,14 @@ function toItem(e: IndexEntry): RegistryItem {
     localPath: e.localPath || e.local_path,
     // Resolve the repo-relative icon path to the registry service's icon URL,
     // loaded as an <img> on a white tile — see the registry web UI's EntryIcon.
-    icon: e.icon ? `${REGISTRY_ICON_BASE}/${e.icon}` : undefined,
+    icon: e.icon
+      ? e.icon.startsWith("http")
+        ? e.icon
+        : `${REGISTRY_ICON_BASE}/${e.icon}`
+      : undefined,
+    when_to_use: e.when_to_use,
+    invocation: e.invocation,
+    pricing: e.pricing,
   };
 }
 
@@ -149,6 +202,8 @@ function emptyCatalog(): RegistryCatalog {
     agents: [],
     workflows: [],
     a2aServices: [],
+    plugins: [],
+    apps: [],
   };
 }
 
@@ -185,7 +240,7 @@ function loadBundledA2aCatalog(): RegistryCatalog {
   return data;
 }
 
-/** Auto-discover packages under sibling agent-services/agents/ (dev). */
+/** Auto-discover A2A packages under hermes-ecosystem/agents/packages/. */
 function loadScannedLocalA2aCatalog(): RegistryCatalog {
   const data = emptyCatalog();
   for (const entry of scanLocalA2aAgentCatalog()) {
@@ -194,11 +249,28 @@ function loadScannedLocalA2aCatalog(): RegistryCatalog {
   return data;
 }
 
-/** Bundled optional overrides + filesystem scan of agent-services/agents. */
-function loadDevA2aCatalog(): RegistryCatalog {
+/** Auto-discover OSS apps under hermes-ecosystem/apps/. */
+function loadScannedLocalAppCatalog(): RegistryCatalog {
+  const data = emptyCatalog();
+  for (const entry of scanLocalAppCatalog()) {
+    data.apps.push(
+      toItem({
+        ...entry,
+        type: "app",
+        when_to_use: entry.description,
+        invocation: "open_ui",
+      } as IndexEntry),
+    );
+  }
+  return data;
+}
+
+/** Bundled overrides + filesystem scan of ecosystem agents/apps. */
+function loadDevLocalCatalog(): RegistryCatalog {
   const data = emptyCatalog();
   mergeCatalog(data, loadBundledA2aCatalog());
   mergeCatalog(data, loadScannedLocalA2aCatalog());
+  mergeCatalog(data, loadScannedLocalAppCatalog());
   return data;
 }
 
@@ -214,12 +286,12 @@ export async function fetchRegistry(
     return cache.data;
   }
   try {
-    const res = await fetch(INDEX_URL, {
+    const res = await fetch(indexUrl(), {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {
       return {
-        ...loadDevA2aCatalog(),
+        ...loadDevLocalCatalog(),
         error: `Registry returned ${res.status}`,
       };
     }
@@ -229,12 +301,12 @@ export async function fetchRegistry(
       const kind = TYPE_TO_KIND[entry.type];
       if (kind && entry.id) data[kind].push(toItem(entry));
     }
-    mergeCatalog(data, loadDevA2aCatalog());
+    mergeCatalog(data, loadDevLocalCatalog());
     cache = { at: Date.now(), data };
     return data;
   } catch (err) {
     return {
-      ...loadDevA2aCatalog(),
+      ...loadDevLocalCatalog(),
       error: err instanceof Error ? err.message : "Failed to load registry",
     };
   }
@@ -299,27 +371,40 @@ export function listInstalledRegistry(profile?: string): InstalledRegistry {
     /* ignore */
   }
   try {
-    const dir = join(profileHome(profile), "workflows");
-    if (existsSync(dir)) {
-      // Workflows install as either <id>.<ext> files or <id>/ folders.
-      workflows = readdirSync(dir).map((f) =>
-        f.replace(/\.(js|mjs|ts|json)$/, ""),
-      );
-    }
-  } catch {
-    /* ignore */
-  }
-  try {
     a2aServices = listInstalledAgentIds();
   } catch {
     /* ignore */
   }
-  return { skills, mcps, workflows, a2aServices };
+  try {
+    workflows = listInstalledEcosystemIds("workflow");
+    const plugins = listInstalledEcosystemIds("plugin");
+    // Apps already under hermes-ecosystem/apps count as present (OSS checkouts).
+    const apps = [
+      ...listInstalledEcosystemIds("app"),
+      ...scanLocalAppCatalog().map((a) => a.id),
+    ];
+    const ecoSkills = listInstalledEcosystemIds("skill");
+    const ecoMcps = listInstalledEcosystemIds("mcp");
+    skills = [...new Set([...skills, ...ecoSkills])];
+    mcps = [...new Set([...mcps, ...ecoMcps])];
+    return {
+      skills,
+      mcps,
+      workflows,
+      a2aServices,
+      plugins,
+      apps: [...new Set(apps)],
+    };
+  } catch {
+    return { skills, mcps, workflows, a2aServices, plugins: [], apps: [] };
+  }
 }
 
 export interface InstallResult {
   success: boolean;
   error?: string;
+  /** Machine-readable reason for UI (e.g. open sign-in modal). */
+  code?: "needs_sign_in" | "needs_entitlement" | "checkout_failed";
 }
 
 async function tryFetchText(path: string): Promise<string> {
@@ -492,116 +577,6 @@ async function downloadFolder(
   return { success: true };
 }
 
-/** Quote a string for single-line YAML if it needs it. */
-function yamlScalar(value: string): string {
-  return /[:#{}[\],&*?|<>=!%@`"']/.test(value) || value.trim() !== value
-    ? JSON.stringify(value)
-    : value;
-}
-
-/**
- * Render one MCP server (from its manifest) as an indented YAML block, in the
- * exact shape the engine's config loader expects (see hermes-agent
- * `tools/mcp_tool.py`): a remote server is keyed by `url` (+ optional
- * `transport: sse` and `headers`); a local server by `command` (+ `args`,
- * `env`). The engine discriminates purely on the presence of `url`.
- */
-function renderMcpYaml(id: string, m: EntryManifest): string {
-  const lines: string[] = [`  ${id}:`];
-  // Remote when the manifest carries a URL or declares an http/sse transport;
-  // otherwise it's a stdio (subprocess) server.
-  const remote = !!m.url || m.transport === "http" || m.transport === "sse";
-  if (remote) {
-    if (m.url) lines.push(`    url: ${yamlScalar(m.url)}`);
-    // The engine only uses its SSE client when transport is explicitly "sse";
-    // streamable-HTTP is the default, so we omit transport otherwise.
-    if (m.transport === "sse") lines.push(`    transport: sse`);
-    if (m.headers && Object.keys(m.headers).length) {
-      lines.push(`    headers:`);
-      for (const [k, v] of Object.entries(m.headers)) {
-        lines.push(`      ${k}: ${yamlScalar(String(v))}`);
-      }
-    }
-  } else {
-    if (m.command) lines.push(`    command: ${yamlScalar(m.command)}`);
-    if (m.args?.length) {
-      lines.push(`    args:`);
-      for (const a of m.args) lines.push(`      - ${yamlScalar(String(a))}`);
-    }
-    if (m.env && Object.keys(m.env).length) {
-      lines.push(`    env:`);
-      for (const [k, v] of Object.entries(m.env)) {
-        lines.push(`      ${k}: ${yamlScalar(String(v))}`);
-      }
-    }
-  }
-  lines.push(`    enabled: true`);
-  return lines.join("\n") + "\n";
-}
-
-/**
- * Add an MCP server entry under `mcp_servers:` in the profile's config.yaml.
- * Mirrors the regex-based reader in installer.ts — no YAML lib is available,
- * so we splice text directly.
- */
-async function installMcp(
-  item: RegistryItem,
-  profile?: string,
-): Promise<InstallResult> {
-  if (!item.path) return { success: false, error: "MCP entry has no path" };
-  const m = await fetchManifest(item.path);
-  if (!m || (!m.url && !m.command)) {
-    return { success: false, error: "MCP manifest has no connection config" };
-  }
-
-  const configPath = join(profileHome(profile), "config.yaml");
-  let content = existsSync(configPath) ? readFileSync(configPath, "utf-8") : "";
-  const block = renderMcpYaml(item.id, m);
-  const sectionRe = /^mcp_servers:\s*\n/m;
-
-  if (sectionRe.test(content)) {
-    if (new RegExp(`^[ ]{2}${item.id}:\\s*$`, "m").test(content)) {
-      return { success: false, error: "Already configured" };
-    }
-    content = content.replace(sectionRe, (mm) => mm + block);
-  } else {
-    if (content.length && !content.endsWith("\n")) content += "\n";
-    content += `mcp_servers:\n${block}`;
-  }
-
-  try {
-    safeWriteFile(configPath, content);
-    return { success: true };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Failed to write config",
-    };
-  }
-}
-
-/** Download a registry skill's folder into <profile>/skills/<category>/<id>/. */
-async function installRegistrySkill(
-  item: RegistryItem,
-  profile?: string,
-): Promise<InstallResult> {
-  if (!item.path) return { success: false, error: "Skill entry has no path" };
-  const category = item.category || "uncategorized";
-  const dest = join(profileHome(profile), "skills", category, item.id);
-  return downloadFolder(item.path, dest);
-}
-
-/** Download a workflow's folder into <profile>/workflows/<id>/. */
-async function installWorkflow(
-  item: RegistryItem,
-  profile?: string,
-): Promise<InstallResult> {
-  if (!item.path)
-    return { success: false, error: "Workflow entry has no path" };
-  const dest = join(profileHome(profile), "workflows", item.id);
-  return downloadFolder(item.path, dest);
-}
-
 /**
  * Install a registry agent as a new profile. Cloning alone copies the default
  * persona, so the imported agent looked identical to default — the bug. We
@@ -627,15 +602,10 @@ async function installAgent(item: RegistryItem): Promise<InstallResult> {
 }
 
 /**
- * Install/"set up" a catalog item into the active profile.
- *   - skill    → download the entry folder into <profile>/skills/<category>/<id>/
- *                (bundled skills, which carry `source` and no `path`, install
- *                via `hermes skills install <source>`)
- *   - mcp      → append the manifest's server to config.yaml `mcp_servers:`
- *   - agent    → clone a profile named after the agent and set its SOUL.md
- *                from the agent's AGENT.md
- *   - workflow → download the entry folder into <profile>/workflows/<id>/
- *   - a2aServices → install into %HERMES_HOME%/agent-services/ and start
+ * Install/"set up" a catalog item.
+ *   - skill/mcp/workflow/plugin/app → hermes-ecosystem (bundled skills without path still use CLI → profile)
+ *   - agent (legacy) → clone profile + SOUL
+ *   - a2aServices → ecosystem/agents + start
  */
 export async function installRegistryItem(
   kind: RegistryKind,
@@ -643,22 +613,95 @@ export async function installRegistryItem(
   profile?: string,
 ): Promise<InstallResult> {
   try {
-    switch (kind) {
-      case "skills":
-        return item.path
-          ? await installRegistrySkill(item, profile)
-          : installSkill(item.source || item.id, profile);
-      case "mcps":
-        return await installMcp(item, profile);
-      case "agents":
-        return await installAgent(item);
-      case "workflows":
-        return await installWorkflow(item, profile);
-      case "a2aServices":
-        return await installA2aService(item);
-      default:
-        return { success: false, error: "Unknown item kind" };
+    const {
+      checkInstallEntitlement,
+      purchaseRegistryItem,
+      resolveAccountId,
+    } = await import("./ecosystem/entitlements");
+
+    let entitlement = await checkInstallEntitlement(item, {
+      localLink: !!item.localPath,
+      profile,
+    });
+
+    // Paid package without entitlement: attempt stub checkout when signed in.
+    if (
+      !entitlement.allowed &&
+      (item.pricing?.model === "paid" ||
+        item.pricing?.model === "subscription") &&
+      !item.localPath
+    ) {
+      const purchased = await purchaseRegistryItem(item, { profile });
+      if (!purchased.success) {
+        return {
+          success: false,
+          code: purchased.code || "needs_entitlement",
+          error:
+            purchased.error ||
+            entitlement.reason ||
+            `Entitlement required to install paid package "${item.id}"`,
+        };
+      }
+      entitlement = await checkInstallEntitlement(item, {
+        localLink: false,
+        profile,
+      });
     }
+
+    if (!entitlement.allowed) {
+      const needsSignIn =
+        /sign in|account required/i.test(entitlement.reason || "") ||
+        !resolveAccountId(profile);
+      return {
+        success: false,
+        code: needsSignIn ? "needs_sign_in" : "needs_entitlement",
+        error:
+          entitlement.reason ||
+          `Entitlement required to install paid package "${item.id}"`,
+      };
+    }
+
+    if (kind === "agents") return await installAgent(item);
+    if (kind === "a2aServices") return await installA2aService(item);
+
+    const pkgKind = registryKindToPackageKind(kind);
+    if (!pkgKind) {
+      return { success: false, error: "Unknown item kind" };
+    }
+
+    if (
+      kind === "skills" &&
+      item.source &&
+      !item.path &&
+      !item.archiveUrl &&
+      !item.githubRepo &&
+      !item.localPath
+    ) {
+      return installSkill(item.source || item.id, profile);
+    }
+
+    const installed = await installEcosystemPackage(pkgKind, item, {
+      profile,
+      listRegistryFolderFiles: listFolderFiles,
+      registryRawBase: REGISTRY_RAW_BASE,
+    });
+    if (installed.success && kind === "apps") {
+      try {
+        const { startEcosystemApp } = await import("./ecosystem/apps-launcher");
+        const started = startEcosystemApp(item.id);
+        if (!started.success) {
+          return {
+            success: true,
+            error: started.error
+              ? `Installed, but start failed: ${started.error}`
+              : undefined,
+          };
+        }
+      } catch {
+        /* start is best-effort */
+      }
+    }
+    return installed;
   } catch (err) {
     return {
       success: false,
@@ -667,10 +710,48 @@ export async function installRegistryItem(
   }
 }
 
+/** Remove an installed Discover item (ecosystem kinds + MCP config). */
+export async function uninstallRegistryItem(
+  kind: RegistryKind,
+  item: RegistryItem,
+  profile?: string,
+): Promise<InstallResult> {
+  const pkgKind = registryKindToPackageKind(kind);
+  if (kind === "skills") {
+    const eco = uninstallEcosystemPackage("skill", item.id, profile);
+    if (eco.success) return eco;
+    const byName = uninstallSkill(item.name, profile);
+    if (byName.success) return byName;
+    return uninstallSkill(item.id, profile);
+  }
+  if (pkgKind && kind !== "a2aServices" && kind !== "agents") {
+    return uninstallEcosystemPackage(pkgKind, item.id, profile);
+  }
+  if (kind === "a2aServices") {
+    const { stopAgentService } = await import("./agent-services");
+    const stopped = stopAgentService(item.id);
+    if (!stopped.success) {
+      return { success: false, error: stopped.error || "Failed to stop agent" };
+    }
+    const { agentServiceInstalledDir } = await import("./agent-services/paths");
+    const { rmSync } = await import("fs");
+    try {
+      rmSync(agentServiceInstalledDir(item.id), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    const { removeCapability } = await import("./ecosystem/capabilities");
+    removeCapability("agent", item.id);
+    return { success: true };
+  }
+  return { success: false, error: "Uninstall not supported for this kind" };
+}
+
+export { linkLocalEcosystemPackage };
+
 /**
- * Resolve catalog `localPath`. Prefer relative paths in catalog JSON
- * (e.g. `../agent-services/agents/crewai-agent`); absolute paths are accepted
- * but discouraged. Relative paths are tried against the desktop app root and cwd.
+ * Resolve catalog `localPath`. Prefer absolute ecosystem paths; relative
+ * paths are tried against the desktop app root and cwd.
  */
 function resolveA2aLocalPath(localPath: string): string {
   const trimmed = localPath.trim();
@@ -718,13 +799,8 @@ async function installA2aService(item: RegistryItem): Promise<InstallResult> {
       item.id,
     );
   } else if (item.path?.trim()) {
-    const { HERMES_HOME } = await import("./installer");
-    const dest = join(
-      HERMES_HOME,
-      "agent-services",
-      "cache",
-      `registry-${item.id}`,
-    );
+    const { agentServicesCacheDir } = await import("./agent-services/paths");
+    const dest = join(agentServicesCacheDir(), `registry-${item.id}`);
     const downloaded = await downloadFolder(item.path, dest);
     if (!downloaded.success) return downloaded;
     installed = await installAgentServiceFromPath(dest);

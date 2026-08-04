@@ -1,60 +1,52 @@
-import { describe, it, expect } from "vitest";
-import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { scanLocalA2aAgentCatalog } from "../src/main/agent-services/local-catalog";
+import { resetEcosystemRootCache } from "../src/main/ecosystem/paths";
 
-describe("scanLocalA2aAgentCatalog", () => {
-  // @lat: [[lat.md/agent-services#Agent services#Discover catalog#Local agents scan]]
-  it("discovers agents/*/manifest.json without a fixed catalog file", () => {
-    const root = join(tmpdir(), `hermes-local-a2a-${Date.now()}`);
-    const agents = join(root, "agent-services", "agents", "demo-agent");
-    mkdirSync(agents, { recursive: true });
-    writeFileSync(
-      join(agents, "manifest.json"),
-      JSON.stringify({
-        id: "demo-agent",
-        version: "0.1.0",
-        name: "Demo Agent",
-        description: "Local scan demo agent for Discover A2A services",
-        skills_hint: [{ id: "demo", description: "Handles demo tasks from Hermes" }],
-      }),
-      "utf-8",
-    );
-    try {
-      const desktopCwd = join(root, "hermes-desktop");
-      mkdirSync(desktopCwd, { recursive: true });
-      const found = scanLocalA2aAgentCatalog(desktopCwd, join(desktopCwd, "out", "main"));
-      expect(found.some((e) => e.id === "demo-agent")).toBe(true);
-      const demo = found.find((e) => e.id === "demo-agent")!;
-      expect(demo.localPath).toBe("../agent-services/agents/demo-agent");
-      expect(demo.tags).toContain("local");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+describe("scanLocalA2aAgentCatalog (ecosystem packages)", () => {
+  const prevEco = process.env.HERMES_ECOSYSTEM_ROOT;
+  let root: string;
+
+  beforeEach(() => {
+    root = join(tmpdir(), `hermes-eco-agents-${Date.now()}`);
+    mkdirSync(join(root, "agents", "packages"), { recursive: true });
+    process.env.HERMES_ECOSYSTEM_ROOT = root;
+    resetEcosystemRootCache();
   });
 
-  it("skips agents-template id", () => {
-    const root = join(tmpdir(), `hermes-local-a2a-skip-${Date.now()}`);
-    const agents = join(root, "agent-services", "agents", "oops");
-    mkdirSync(agents, { recursive: true });
+  afterEach(() => {
+    if (prevEco === undefined) delete process.env.HERMES_ECOSYSTEM_ROOT;
+    else process.env.HERMES_ECOSYSTEM_ROOT = prevEco;
+    resetEcosystemRootCache();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  // @lat: [[lat.md/agent-services#Agent services#Discover catalog#Local agents scan]]
+  it("scans hermes-ecosystem/agents/packages and uses absolute localPath", async () => {
+    const pkg = join(root, "agents", "packages", "demo-agent");
+    mkdirSync(pkg, { recursive: true });
     writeFileSync(
-      join(agents, "manifest.json"),
+      join(pkg, "manifest.json"),
       JSON.stringify({
-        id: "agents-template",
-        version: "0.3.0",
-        name: "Template",
-        description: "Should not appear in Discover scan results at all",
+        id: "demo-agent",
+        name: "Demo Agent",
+        version: "1.0.0",
+        description: "demo",
+        entrypoint: { command: ["shared:python", "-m", "app.server"] },
+        skills_hint: [{ id: "research", description: "r" }],
       }),
-      "utf-8",
     );
-    try {
-      const desktopCwd = join(root, "hermes-desktop");
-      mkdirSync(desktopCwd, { recursive: true });
-      const found = scanLocalA2aAgentCatalog(desktopCwd, join(desktopCwd, "out", "main"));
-      expect(found.some((e) => e.id === "agents-template")).toBe(false);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+
+    const { scanLocalA2aAgentCatalog } = await import(
+      "../src/main/agent-services/local-catalog"
+    );
+    const found = scanLocalA2aAgentCatalog();
+    const demo = found.find((e) => e.id === "demo-agent");
+    expect(demo).toBeTruthy();
+    expect(demo!.localPath.replace(/\\/g, "/")).toContain(
+      "agents/packages/demo-agent",
+    );
+    expect(demo!.localPath.includes("agent-services")).toBe(false);
   });
 });

@@ -1,10 +1,11 @@
 /**
- * Dev-time Discover feed: scan sibling agent-services/agents/<id>/manifest.json
- * so new local agents appear without editing resources/a2a-services-catalog.json.
+ * Discover feed: scan hermes-ecosystem/agents/packages/<id>/manifest.json.
+ * Third-party A2A agents live under ecosystem only — no agent-services.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { join, resolve } from "path";
+import { join } from "path";
+import { getEcosystemRoot } from "../ecosystem/paths";
 import type { AgentServiceManifest } from "./types";
 
 export interface LocalA2aCatalogEntry {
@@ -19,37 +20,18 @@ export interface LocalA2aCatalogEntry {
   platforms: Array<"win32" | "darwin" | "linux">;
 }
 
-/** Candidate roots for …/agent-services/agents (sibling of hermes-desktop). */
-export function resolveAgentServicesAgentsRoots(
-  fromCwd = process.cwd(),
-  fromDirname = __dirname,
-): string[] {
-  const candidates = [
-    join(fromDirname, "../../../agent-services/agents"), // out/main → ../../.. = repo parent? out/main -> ../.. = project, ../../.. = private
-    join(fromDirname, "../../agent-services/agents"),
-    join(fromCwd, "../agent-services/agents"),
-    join(fromCwd, "agent-services/agents"),
-  ];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const c of candidates) {
-    const abs = resolve(c);
-    if (seen.has(abs.toLowerCase())) continue;
-    seen.add(abs.toLowerCase());
-    if (existsSync(abs) && statSync(abs).isDirectory()) out.push(abs);
-  }
-  return out;
+/** Source packages available to install (not the runtime installed/ copies). */
+export function ecosystemAgentPackagesRoot(): string {
+  return join(getEcosystemRoot(), "agents", "packages");
 }
 
-function relativeLocalPath(agentsRoot: string, packageDir: string): string {
-  // Prefer portable catalog form relative to hermes-desktop cwd.
-  const name = packageDir.replace(/\\/g, "/").split("/").pop() || "";
-  void agentsRoot;
-  return `../agent-services/agents/${name}`;
+export function resolveEcosystemAgentPackageRoots(): string[] {
+  const root = ecosystemAgentPackagesRoot();
+  if (existsSync(root) && statSync(root).isDirectory()) return [root];
+  return [];
 }
 
 function manifestToEntry(
-  agentsRoot: string,
   packageDir: string,
   manifest: AgentServiceManifest,
 ): LocalA2aCatalogEntry | null {
@@ -62,7 +44,6 @@ function manifestToEntry(
     .filter(Boolean)
     .slice(0, 8);
   if (!tags.includes("a2a")) tags.push("a2a");
-  tags.push("local");
 
   return {
     id,
@@ -71,27 +52,24 @@ function manifestToEntry(
     version: manifest.version || "0.0.0",
     description:
       manifest.description?.trim() ||
-      `${manifest.name || id} — local A2A agent (shared-venv)`,
-    category: tags[0] || "local",
+      `${manifest.name || id} — A2A agent (ecosystem)`,
+    category: tags[0] || "agent",
     tags,
-    localPath: relativeLocalPath(agentsRoot, packageDir),
+    // Absolute path so install does not depend on agent-services layout.
+    localPath: packageDir,
     platforms: ["win32", "darwin", "linux"],
   };
 }
 
 /**
- * Scan agent-services/agents for installable packages.
- * Does not include agents-template (lives outside agents/).
+ * Scan hermes-ecosystem/agents/packages for installable A2A agents.
  */
-export function scanLocalA2aAgentCatalog(
-  fromCwd = process.cwd(),
-  fromDirname = __dirname,
-): LocalA2aCatalogEntry[] {
+export function scanLocalA2aAgentCatalog(): LocalA2aCatalogEntry[] {
   // @lat: [[lat.md/agent-services#Agent services#Discover catalog#Local agents scan]]
   const entries: LocalA2aCatalogEntry[] = [];
   const seenIds = new Set<string>();
 
-  for (const agentsRoot of resolveAgentServicesAgentsRoots(fromCwd, fromDirname)) {
+  for (const agentsRoot of resolveEcosystemAgentPackageRoots()) {
     let names: string[];
     try {
       names = readdirSync(agentsRoot);
@@ -111,16 +89,20 @@ export function scanLocalA2aAgentCatalog(
         const manifest = JSON.parse(
           readFileSync(manifestPath, "utf-8"),
         ) as AgentServiceManifest;
-        const entry = manifestToEntry(agentsRoot, packageDir, manifest);
+        const entry = manifestToEntry(packageDir, manifest);
         if (!entry || seenIds.has(entry.id)) continue;
         seenIds.add(entry.id);
         entries.push(entry);
       } catch {
-        /* skip bad manifests */
+        /* skip bad manifest */
       }
     }
   }
 
-  entries.sort((a, b) => a.name.localeCompare(b.name));
   return entries;
+}
+
+/** @deprecated Use resolveEcosystemAgentPackageRoots — agent-services removed. */
+export function resolveAgentServicesAgentsRoots(): string[] {
+  return resolveEcosystemAgentPackageRoots();
 }

@@ -1,32 +1,33 @@
 # Agent services
 
-Cloud-downloadable and locally linked A2A agent services live under [[src/main/agent-services/paths.ts#AGENT_SERVICES_ROOT]]. Multiple agents share one `shared-venv` (never Hermes `resources/python`); each agent is still one process and one A2A port.
+Cloud-downloadable and locally linked A2A agent services live under [[src/main/agent-services/paths.ts#getAgentServicesRoot]] (`<hermes-ecosystem>/agents`). Multiple agents share one `shared-venv` under ecosystem runtimes (never Hermes `resources/python`); each agent is still one process and one A2A port.
 
 ## Layout
 
-Installed agents live under `installed/<id>/` with manifest, state, env, and logs. The shared interpreter is `shared-venv/` beside `catalog.json` (override with `HERMES_AGENT_SERVICES_SHARED_VENV`).
+Installed agents live under `installed/<id>/` with manifest, state, env, and logs. The shared interpreter is `hermes-ecosystem/runtimes/python/shared-venv/` (override with `HERMES_AGENT_SERVICES_SHARED_VENV`).
 
 ```
-%HERMES_HOME%/agent-services/
-├── catalog.json
-├── shared-venv/          # multi-agent shared Python (not Hermes runtime)
-├── cache/
-└── installed/<id>/
-    ├── manifest.json
-    ├── state.json
-    ├── .env
-    └── logs/stdout.log
+%HERMES_ECOSYSTEM_ROOT%/
+├── runtimes/python/shared-venv/
+└── agents/
+    ├── catalog.json
+    ├── cache/
+    └── installed/<id>/
+        ├── manifest.json
+        ├── state.json
+        ├── .env
+        └── logs/stdout.log
 ```
 
-Dev link mode still uses [[src/main/agent-services/installer.ts#installAgentServiceFromPath]]; when the work dir is under `agent-services/agents/`, shared-venv resolves to that repo's `shared-venv/`.
+Dev packages live under `hermes-ecosystem/agents/packages/` (Discover) and install into `agents/installed/`. Shared-venv always resolves under ecosystem `runtimes/python/`. There is no `agent-services` repo fallback.
 
 ## Shared Python runtime
 
-All agents may share one venv under agent-services so disk use stays one copy of dependencies. Hermes bundled Python only bootstraps that venv.
+All agents may share one venv under ecosystem runtimes so disk use stays one copy of dependencies. Hermes bundled Python only bootstraps that venv.
 
 ### Shared venv path
 
-[[src/main/agent-services/paths.ts#resolveSharedVenvRoot]] picks `HERMES_AGENT_SERVICES_SHARED_VENV`, else repo `…/agent-services/shared-venv` for link mode, else `%HERMES_HOME%/agent-services/shared-venv`.
+[[src/main/agent-services/paths.ts#resolveSharedVenvRoot]] picks `HERMES_AGENT_SERVICES_SHARED_VENV`, else `hermes-ecosystem/runtimes/python/shared-venv` (from workDir under ecosystem or the default root).
 
 ### Resolve shared python
 
@@ -74,7 +75,7 @@ Discover lists A2A packages as kind `a2aServices`, separate from Hermes profile 
 
 ### Local agents scan
 
-[[src/main/agent-services/local-catalog.ts#scanLocalA2aAgentCatalog]] reads `../agent-services/agents/*/manifest.json` so new agents show up without editing `resources/a2a-services-catalog.json`.
+[[src/main/agent-services/local-catalog.ts#scanLocalA2aAgentCatalog]] reads `hermes-ecosystem/agents/packages/*/manifest.json` so third-party A2A agents appear without `agent-services`.
 
 ### Install A2A service
 

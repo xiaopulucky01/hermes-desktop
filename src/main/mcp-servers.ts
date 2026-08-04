@@ -835,6 +835,22 @@ export async function setMcpServerEnabled(
       );
       return { success: true };
     }
+    if (enabled) {
+      try {
+        const { ensureMcpRuntimeReady } = await import(
+          "./ecosystem/runtime-pool"
+        );
+        const ensured = ensureMcpRuntimeReady(name);
+        if (!ensured.ok) {
+          return {
+            success: false,
+            error: ensured.error || "Runtime pool not ready",
+          };
+        }
+      } catch {
+        /* non-ecosystem MCPs have no pool */
+      }
+    }
     writeConfig(
       setMcpServerEnabledInConfig(readConfig(profile), name, enabled),
       profile,
@@ -854,6 +870,20 @@ export async function testMcpServer(
 ): Promise<McpOperationResult> {
   try {
     if (!isRemoteMode()) {
+      try {
+        const { ensureMcpRuntimeReady } = await import(
+          "./ecosystem/runtime-pool"
+        );
+        const ensured = ensureMcpRuntimeReady(name);
+        if (!ensured.ok) {
+          return {
+            success: false,
+            error: ensured.error || "Runtime pool not ready",
+          };
+        }
+      } catch {
+        /* pool ensure is best-effort for non-ecosystem MCPs */
+      }
       const result = await runHermesMcpCli(["test", name], profile);
       return {
         success: true,
