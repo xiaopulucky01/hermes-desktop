@@ -12,6 +12,7 @@ files:
   - "!resources/hermes-agent-skills.tar.gz"
   - "!resources/python-build-standalone.tar.gz"
   - "!resources/.hermes-agent-skills.tar.gz"
+  - "!resources/hermes-agent/**"
 asarUnpack:
   - resources/**
   - node_modules/better-sqlite3/build/Release/*.node

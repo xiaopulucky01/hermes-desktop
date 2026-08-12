@@ -1,0 +1,50 @@
+1. Clone 官方仓库（或打 tag）
+# 建议单独放，不要和 desktop 仓库搅在一起
+cd D:\Project\private\hermes-desktop\resources
+git clone https://github.com/NousResearch/hermes-agent.git
+cd hermes-agent
+
+# 可选：钉到正式 release
+git fetch --tags
+git checkout v2026.8.3
+# 或最新 main：git checkout main && git pull
+
+
+2. 用 bundled 解释器安装（关键）
+# 使用powershell
+$PY = "D:\Project\private\hermes-desktop\resources\python\python.exe"
+$AGENT = "D:\Project\private\hermes-desktop\resources\hermes-agent"
+
+# 先升级安装工具
+& $PY -m pip install -U pip
+
+#重装前先卸旧包（更稳）
+& $PY -m pip uninstall -y hermes-agent
+
+$env:HERMES_NIX_BUILD = "1"
+& $PY -m pip install --no-build-isolation "$AGENT[acp]"
+
+
+
+3. 装完跑桌面补丁 + skills（建议）
+cd D:\Project\private\hermes-desktop
+node scripts/patch-bundled-python.mjs
+# skills：可 npm run 对应 prepare-bundled-skills，或按你们现有脚本
+#否则可能缺桌面补丁、官方 skills 仍停在旧版。
+
+
+
+
+4. 自检 + 重启
+Test-Path "D:\Project\private\hermes-desktop\resources\python\Lib\site-packages\hermes_cli\main.py"  
+# 应该为True
+& $PY -c "import hermes_cli; print(hermes_cli.__version__)"
+& $PY -m pip show hermes-agent
+#然后完全退出再开桌面（gateway 会缓存旧解释器/模块）。
+
+
+
+
+
+
+
