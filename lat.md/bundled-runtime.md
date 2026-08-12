@@ -30,8 +30,10 @@ The `image_gen/relay` and `video_gen/relay` plugins delegate generation to an up
 
 ## Git Bash lookup patch
 
-`scripts/patch-bundled-python.mjs` patches upstream `tools/environments/local.py` `_find_bash` so the candidates list includes `HERMES_HOME/git` and `%LOCALAPPDATA%\\AI-Compartner\\git` before the stock `hermes\\git` / system Git paths.
+`scripts/patch-bundled-python.mjs` patches `_find_bash` to also search `HERMES_HOME/git` and `%LOCALAPPDATA%\\AI-Compartner\\git`.
+
+Matching normalizes CRLF→LF so Windows hermes-agent 0.20+ checkouts still apply.
 
 ## Gateway home-channel patch
 
-The same script rewrites the gateway `run.py` home-channel block: keep upstream secret/config `home_env` resolution, auto-`/sethome` for weixin/wecom/dingtalk/feishu, and show a Chinese notice on first turn when still unset.
+The same script rewrites the gateway `run.py` home-channel block for CN auto-`/sethome` and a Chinese first-turn notice. The match target tracks upstream 0.20 (no unused `get_profile_dir` import in the secondary-profile branch).

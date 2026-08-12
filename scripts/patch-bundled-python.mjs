@@ -106,6 +106,12 @@ function copyDesktopMediaStorage() {
 const GATEWAY_HOME_CHANNEL_PATCH_MARKER = "# desktop: auto-sethome + zh notice v2";
 const LOCAL_FIND_BASH_PATCH_MARKER = "# desktop: HERMES_HOME git bash lookup";
 
+/** Read a Python source file and normalize CRLF→LF so patch needles match
+ *  Windows checkouts / wheel extracts of hermes-agent (0.20+). */
+function readPythonSource(path) {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
 function gatewayHomeChannelPatchedBlock() {
   // Outer `if` drops `not history` so CN auto-sethome can run on later turns;
   // the Chinese notice stays gated on `not history and not home_env`.
@@ -136,7 +142,6 @@ function gatewayHomeChannelPatchedBlock() {
             # under that profile's loaded config — check after scope install.
             if not home_env:
                 try:
-                    from hermes_cli.profiles import get_profile_dir
                     from gateway.config import load_gateway_config as _lgc
                     prof = (getattr(source, "profile", None) or "").strip()
                     if prof and prof != "default":
@@ -211,7 +216,7 @@ function patchLocalFindBash() {
     log("tools/environments/local.py not found — skip bash lookup patch");
     return;
   }
-  let content = readFileSync(localPath, "utf8");
+  let content = readPythonSource(localPath);
   if (content.includes(LOCAL_FIND_BASH_PATCH_MARKER)) {
     log("local.py bash lookup already patched");
     return;
@@ -219,12 +224,14 @@ function patchLocalFindBash() {
 
   // Upstream _find_bash builds a candidates list, then probes which bash
   // actually starts. Desktop inserts HERMES_HOME git paths into that list.
+  // Anchor on the stable HERMES_GIT_BASH_PATH block + portable-Git comment
+  // start (0.20+ lengthened the comment body after this prefix).
   const needle = `    custom = os.environ.get("HERMES_GIT_BASH_PATH")
     if custom and os.path.isfile(custom):
         candidates.append(custom)
 
     # Prefer our own portable Git install — a broken or partially-uninstalled`;
-  const replacement = `    custom = os.environ.get("HERMES_GIT_BASH_PATH")
+  const insertion = `    custom = os.environ.get("HERMES_GIT_BASH_PATH")
     if custom and os.path.isfile(custom):
         candidates.append(custom)
 
@@ -245,7 +252,7 @@ function patchLocalFindBash() {
       "local.py _find_bash block not found — upstream changed; update patch-bundled-python.mjs",
     );
   }
-  content = content.replace(needle, replacement);
+  content = content.replace(needle, insertion);
 
   // Also search %LOCALAPPDATA%\\AI-Compartner\\git (desktop default home).
   const legacyNeedle = `_hermes_portable_git = os.path.join(_local_appdata, "hermes", "git") if _local_appdata else ""
@@ -281,7 +288,7 @@ function patchGatewayHomeChannelNotice() {
     log("gateway/run.py not found — skip home-channel patch");
     return;
   }
-  let content = readFileSync(runPath, "utf8");
+  let content = readPythonSource(runPath);
   if (content.includes(GATEWAY_HOME_CHANNEL_PATCH_MARKER)) {
     log("gateway/run.py home-channel notice already patched");
     return;
@@ -314,7 +321,6 @@ function patchGatewayHomeChannelNotice() {
             # under that profile's loaded config — check after scope install.
             if not home_env:
                 try:
-                    from hermes_cli.profiles import get_profile_dir
                     from gateway.config import load_gateway_config as _lgc
                     prof = (getattr(source, "profile", None) or "").strip()
                     if prof and prof != "default":
@@ -384,7 +390,7 @@ function patchImageGenerateToolForDesktop() {
     log("tools/image_generation_tool.py not found — skip desktop patch");
     return;
   }
-  let content = readFileSync(toolPath, "utf8");
+  let content = readPythonSource(toolPath);
   if (content.includes("works_label")) {
     log("image_generation_tool.py already patched for desktop");
     return;
@@ -471,7 +477,7 @@ function patchMemoryToolAccountPaths() {
     log("tools/memory_tool.py not found — skip account paths patch");
     return;
   }
-  let content = readFileSync(toolPath, "utf8");
+  let content = readPythonSource(toolPath);
   if (content.includes(MEMORY_ACCOUNT_PATHS_MARKER)) {
     log("memory_tool.py account paths already patched");
     return;
@@ -520,7 +526,7 @@ function patchDisplayHermesHome() {
     log("hermes_constants.py not found — skip display_hermes_home patch");
     return;
   }
-  let content = readFileSync(constantsPath, "utf8");
+  let content = readPythonSource(constantsPath);
   if (content.includes(DISPLAY_HERMES_HOME_PATCH_MARKER)) {
     log("hermes_constants.py display_hermes_home already patched");
     return;
@@ -563,7 +569,7 @@ function patchGatewayAllowlistWarning() {
     log("gateway/run.py not found — skip allowlist warning patch");
     return;
   }
-  let content = readFileSync(runPath, "utf8");
+  let content = readPythonSource(runPath);
   if (
     content.includes(GATEWAY_ALLOWLIST_WARNING_PATCH_MARKER) ||
     content.includes(
