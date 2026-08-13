@@ -2546,11 +2546,20 @@ body:has(.shell-vibrant),
 }
 
 .sidebar-recent-section-toggle span {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sidebar-recent-section-count {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
 }
 
 .sidebar-recent-disclosure-icon {
@@ -2579,6 +2588,20 @@ body:has(.shell-vibrant),
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+
+/* Pinned section: show ~10 rows, scroll the rest without growing the sidebar. */
+.sidebar-recent-pinned-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  min-width: 0;
+  /* 10 × (.sidebar-recent-session ≈ 12px line + 12px vertical padding) */
+  max-height: calc(10 * 32px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .sidebar-recent-project {

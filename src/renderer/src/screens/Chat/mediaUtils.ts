@@ -375,6 +375,121 @@ function prepareGluedTableLine(line: string): string {
 }
 
 /**
+ * Normalize punctuation that breaks GFM table parsing: fullwidth pipes from
+ * CJK keyboards/models, and exotic line endings that leave a whole table on
+ * one logical line for `\n`-based splitters.
+ */
+function normalizeMarkdownTablePunctuation(text: string): string {
+  return text
+    .replace(/\uFF5C/g, "|") // fullwidth ｜
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\u2028|\u2029/g, "\n");
+}
+
+/** Parse cells from a segment that may omit the leading/trailing pipes. */
+function parseBareOrPipedCells(segment: string): string[] {
+  let s = segment.trim();
+  if (!s) return [];
+  if (!s.startsWith("|")) s = `| ${s}`;
+  if (!s.endsWith("|")) s = `${s} |`;
+  return parseTableCells(s);
+}
+
+/**
+ * When a 2-col header is followed by `N | title | source` rows, fold the
+ * leading index into the title cell so column width stays aligned.
+ */
+function fitNumberedDigestRowCells(cells: string[], columns: number): string[] {
+  if (
+    columns >= 2 &&
+    cells.length === columns + 1 &&
+    /^\d+$/.test(cells[0].trim())
+  ) {
+    return [`${cells[0].trim()}. ${cells[1]}`, ...cells.slice(2)];
+  }
+  return fitTableRowCells(cells, columns);
+}
+
+/**
+ * Split glued bare rows like `1 | news | src || 2 | news2 | src2 |` that omit
+ * the leading `|` — existing `||` splitters require a pipe-prefixed line, and
+ * `repairBarePipeRows` skips lines that already end with `|`.
+ */
+function repairGluedBarePipeTableRows(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let tableColumns = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (isPureTableSeparatorLine(trimmed) || TABLE_SEPARATOR_RE.test(trimmed)) {
+      tableColumns = countTableColumns(trimmed);
+      out.push(line);
+      continue;
+    }
+
+    if (TABLE_ROW_RE.test(trimmed) && looksLikeTableHeader(trimmed)) {
+      tableColumns = countTableColumns(trimmed);
+      out.push(line);
+      continue;
+    }
+
+    if (trimmed.startsWith("|") || !trimmed.includes("||")) {
+      out.push(line);
+      continue;
+    }
+
+    const prev = previousNonBlankLine(out, out.length - 1);
+    const inTable =
+      !!prev &&
+      (isTableLine(prev.trim()) ||
+        isPureTableSeparatorLine(prev.trim()) ||
+        TABLE_SEPARATOR_RE.test(prev.trim()));
+    const numberedDigest = /^\d+\s*\|/.test(trimmed);
+    if (!inTable && !numberedDigest) {
+      out.push(line);
+      continue;
+    }
+
+    const segments = trimmed
+      .split(/\|\|/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (segments.length < 2) {
+      out.push(line);
+      continue;
+    }
+
+    const parsed = segments.map(parseBareOrPipedCells);
+    if (parsed.some((cells) => cells.length < 2)) {
+      out.push(line);
+      continue;
+    }
+
+    let columns = tableColumns;
+    if (columns < 2) {
+      const counts = parsed.map((cells) => cells.length);
+      const same = counts.every((n) => n === counts[0]);
+      columns = same ? counts[0] : Math.min(...counts);
+    }
+    if (columns < 2) {
+      out.push(line);
+      continue;
+    }
+
+    for (const cells of parsed) {
+      out.push(formatTableRow(fitNumberedDigestRowCells(cells, columns)));
+    }
+    tableColumns = columns;
+  }
+
+  return out.join("\n");
+}
+
+/**
  * Recover a glued `||` table buried after a broken backtick / orphaned cell
  * fragment (e.g. `` `代码块折叠等。 | Web Preview | ✅ || … ``).
  */
@@ -395,6 +510,11 @@ function salvagePrefixedGluedTableLine(line: string): string {
     );
   }
 
+  // Numbered digest rows (`1 | title | src || 2 | …`) are repaired elsewhere.
+  if (/^\d+\s*\|/.test(trimmed) && trimmed.includes("||")) {
+    return line;
+  }
+
   // Need clear row-glue evidence so prose like "A | B | C" is left alone.
   if ((trimmed.match(/\|\|/g) || []).length < 2) return line;
 
@@ -406,6 +526,11 @@ function salvagePrefixedGluedTableLine(line: string): string {
   const prefix = trimmed.slice(0, start).trim().replace(/\|$/, "").trim();
   const table = prepareGluedTableLine(trimmed.slice(start).trim());
   if (!table.trim().startsWith("|")) return line;
+
+  // A bare row index before the first pipe belongs inside the table row.
+  if (/^\d+$/.test(prefix)) {
+    return prepareGluedTableLine(`| ${prefix} ${table.trim()}`);
+  }
 
   // Orphaned end of a previous cell ("…折叠等。") — drop it; the rest is the table.
   if (prefix && /[。！？.!?]$/.test(prefix)) return table;
@@ -655,7 +780,7 @@ function splitGluedTableRowByStructure(line: string, columns: number): string | 
 
   if (rowGroups.length > 1) {
     rows = rowGroups.map((group) =>
-      formatTableRow(fitTableRowCells(group, columns)),
+      formatTableRow(fitNumberedDigestRowCells(group, columns)),
     );
   } else if (cells.length % columns === 0) {
     rows = [];
@@ -663,7 +788,7 @@ function splitGluedTableRowByStructure(line: string, columns: number): string | 
       rows.push(formatTableRow(cells.slice(i, i + columns)));
     }
   } else {
-    rows = [formatTableRow(fitTableRowCells(cells, columns))];
+    rows = [formatTableRow(fitNumberedDigestRowCells(cells, columns))];
   }
 
   const result = rows.join("\n");
@@ -2116,7 +2241,10 @@ export function normalizeAgentMarkdown(
   s = unwrapMislabeledFences(s);
 
   return transformOutsideCode(s, (text) => {
-    let t = repairBoldArrowFragmentRows(text);
+    // Chinese models (e.g. Qwen) often emit fullwidth `｜` and odd line
+    // endings; normalize those before any pipe-table repairs.
+    let t = normalizeMarkdownTablePunctuation(text);
+    t = repairBoldArrowFragmentRows(t);
     t = repairBrokenBoldMarkers(t);
     t = repairSpacedBoldClosers(t);
     t = normalizeBoldRecommendationRows(t);
@@ -2142,10 +2270,12 @@ export function normalizeAgentMarkdown(
       .join("\n");
 
     // "...文字## 标题" → break before the heading marker.
-    t = t.replace(/([^\n#])(#{1,6}\s+)/g, "$1\n\n$2");
+    // Require a non-space/non-pipe char before `#` so table cells like
+    // `| # | 新闻 |` are left intact (space-before-hash used to split them).
+    t = t.replace(/([^\n#|\s])(#{1,6}\s+)/g, "$1\n\n$2");
     // "...查询###海量" → break and insert a space after glued hashes.
     t = t.replace(
-      /([^\n#])(#{1,6})(?=[\u4e00-\u9fffA-Za-z])/g,
+      /([^\n#|\s])(#{1,6})(?=[\u4e00-\u9fffA-Za-z])/g,
       "$1\n\n$2 ",
     );
 
@@ -2179,6 +2309,8 @@ export function normalizeAgentMarkdown(
 
     // "| ~5MB | | 桌面壳 |" and similar row glue on a single line.
     // Insert separators first so column width is known when splitting glued rows.
+    // Bare numbered digests (`1 | news | src || 2 | …`) before pipe-prefixed splits.
+    t = repairGluedBarePipeTableRows(t);
     t = compactTableBlocks(t);
     t = insertMissingTableSeparators(t);
     t = fixMergedTableHeaders(t);

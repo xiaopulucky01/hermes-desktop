@@ -1,17 +1,12 @@
 # A2A integration
 
-
-
 Hermes Desktop loads the A2A plugin from `resources/hermes-a2a/` in this repo (dev and packaged exe) — not from bundled `resources/python`. A sibling `../hermes-a2a` repo is optional for staging overrides only.
-
-
 
 ## Junction layout
 
-
+On every app launch the plugin is junctioned into the local Hermes plugins tree so the gateway can discover it without touching bundled site-packages.
 
 ```
-
 hermes-desktop/
 └── resources/hermes-a2a/
     └── plugins/platforms/a2a/
@@ -19,17 +14,15 @@ hermes-desktop/
 %LOCALAPPDATA%\hermes\plugins\platforms\a2a  →  resources/hermes-a2a/plugins/platforms/a2a
 ```
 
-On every app launch [[src/main/a2a-plugin.ts#ensureA2aPluginLinked]] junctions the plugin into `%LOCALAPPDATA%\hermes\plugins\platforms\a2a`. `scripts/link-hermes-a2a.ps1` remains a manual equivalent.
+[[src/main/a2a-plugin.ts#ensureA2aPluginLinked]] creates that junction into `%LOCALAPPDATA%\hermes\plugins\platforms\a2a`. `scripts/link-hermes-a2a.ps1` remains a manual equivalent.
 
 Hermes discovers user platform plugins from `HERMES_HOME/plugins/` at gateway startup. No edits under `resources/python/Lib/site-packages` are required, so `npm run prepare-runtime` does not wipe A2A.
 
-
-
 ## Enablement
 
+When the A2A plugin is present, desktop auto-writes config and env so users never edit YAML by hand.
 
-
-When the bundled or sibling A2A plugin is present, [[src/main/a2a-plugin.ts#ensureA2aConfig]] auto-writes `plugins.enabled`, `platforms.a2a`, `display.platforms.a2a.streaming`, and optional toolset entries into `config.yaml`. [[src/main/a2a-plugin.ts#ensureA2aEnv]] auto-generates `A2A_BEARER_TOKEN` and sets `A2A_HOST=0.0.0.0` in `.env` when missing — users do not edit YAML or env by hand.
+[[src/main/a2a-plugin.ts#ensureA2aConfig]] writes `plugins.enabled`, `platforms.a2a`, `display.platforms.a2a.streaming`, and optional toolset entries into `config.yaml`. [[src/main/a2a-plugin.ts#ensureA2aEnv]] auto-generates `A2A_BEARER_TOKEN` and sets `A2A_HOST=0.0.0.0` in `.env` when missing.
 
 Inbound streaming uses A2A `message/stream` over Server-Sent Events; blocking callers use `message/send`. The Agent Card advertises `capabilities.streaming: true`.
 
@@ -63,7 +56,9 @@ Local desktop sessions start the gateway at launch so A2A does not wait for the 
 
 ## Packaged installs
 
-`resources/hermes-a2a/` is the canonical A2A plugin tree for dev and release. [[scripts/stage-hermes-a2a.mjs]] runs before `electron-builder`; it **keeps** an existing staged tree unless `HERMES_A2A_FORCE_STAGE=1` or `HERMES_A2A_ROOT` points at an external copy to overwrite.
+`resources/hermes-a2a/` is the canonical A2A plugin tree for both dev and release builds.
+
+`scripts/stage-hermes-a2a.mjs` runs before `electron-builder` and **keeps** an existing staged tree unless `HERMES_A2A_FORCE_STAGE=1` or `HERMES_A2A_ROOT` points at an external copy to overwrite.
 
 The tree ships inside the installer (`asarUnpack: resources/**`). [[src/main/a2a-plugin.ts#resolveHermesA2aPluginDir]] loads `process.resourcesPath/hermes-a2a` when packaged. At runtime, override with `HERMES_A2A_ROOT` if needed.
 

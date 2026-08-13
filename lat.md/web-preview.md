@@ -21,6 +21,8 @@ Remote pages still run fully sandboxed: `hardenWebviewPreferences` forces `nodeI
 
 ## Load errors and CSP
 
-[[src/renderer/src/screens/Chat/WebPreviewPanel.tsx#WebPreviewPanel]] drives navigation only through the declarative `<webview src={currentUrl}>` binding — imperative `webview.src = …` assignments race React updates and produce benign `ERR_ABORTED (-3)` noise on redirects and quick URL changes, so `did-fail-load` ignores `-3` and subframe failures.
+Preview navigation stays declarative so React updates do not race the webview and spam abort errors.
 
-The renderer CSP in [[src/renderer/index.html]] and [[src/main/app/start.ts]] includes `worker-src 'self' blob:` so Vite's dev HMR client can spawn its blob-backed worker without violating `script-src`.
+[[src/renderer/src/screens/Chat/WebPreviewPanel.tsx#WebPreviewPanel]] drives loads only through `<webview src={currentUrl}>` — imperative `webview.src = …` assignments race React updates and produce benign `ERR_ABORTED (-3)` noise on redirects and quick URL changes, so `did-fail-load` ignores `-3` and subframe failures.
+
+The renderer CSP in `src/renderer/index.html` and [[src/main/app/start.ts]] includes `worker-src 'self' blob:` so Vite's dev HMR client can spawn its blob-backed worker without violating `script-src`.

@@ -50,6 +50,12 @@ Each action calls an existing desktop API with an optimistic local update and ro
 
 Pinned rows are a desktop-only affordance: their ids live in `localStorage` (`hermes.sidebar.pinnedSessions`), and pinned sessions are pulled out of the normal grouping into a collapsible **Pinned** section at the top of the list.
 
+## Pinned sessions on open
+
+Pinned chats must appear as soon as the app opens, even when they are older than the first recent page.
+
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#mergePinnedIntoSessionPage]] merges any pinned rows present in a sync/cache pool into the first page, and [[src/main/session-cache.ts#getCachedSessionsByIds]] (IPC `get-cached-sessions-by-ids`) hydrates pins still missing after the first page load. The pinned list shows at most [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#PINNED_VISIBLE_ROWS|10]] rows at once; further pins scroll inside `.sidebar-recent-pinned-scroll`. Section headers show counts: pinned uses the hydrated pin list length, and Chats uses [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#countSidebarChats]] over a growing session catalog so pagination does not under-count.
+
 ## Full-list modal
 
 The Cmd/Ctrl+K menu action opens an 80%×80% modal that reuses the existing Sessions screen rather than a separate route.

@@ -1104,6 +1104,20 @@ const hermesAPI = {
     }>
   > => ipcRenderer.invoke("list-cached-sessions", limit, offset),
 
+  getCachedSessionsByIds: (
+    ids: string[],
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      startedAt: number;
+      source: string;
+      messageCount: number;
+      model: string;
+      contextFolder: string | null;
+    }>
+  > => ipcRenderer.invoke("get-cached-sessions-by-ids", ids),
+
   syncSessionCache: (): Promise<
     Array<{
       id: string;

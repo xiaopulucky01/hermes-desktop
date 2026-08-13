@@ -12,11 +12,15 @@ Set `HERMES_BUNDLED_RUNTIME=0` to force the legacy online installer path.
 
 ## Spawn executable
 
-On Windows the prepare-runtime bundle uses [[src/main/bundled-runtime.ts#resolveBundledSpawnExecutable]] to launch `python.exe` (not `pythonw.exe`) with a `realpath`-normalized path. Console flashes are suppressed by `sitecustomize.py` (`CREATE_NO_WINDOW`). [[src/main/installer.ts#buildHermesChildEnv]] sets `PYTHONPATH` to the bundled site-packages for gateway and CLI spawns. [[src/main/installer.ts#getHermesPythonSpawnPath]] re-resolves the bundled interpreter at spawn time so a dev session started before `prepare-runtime` can recover once the bundle is installed.
+On Windows the bundle launches console `python.exe` with a normalized path so gateway/CLI spawns stay flash-free.
+
+[[src/main/bundled-runtime.ts#resolveBundledSpawnExecutable]] picks `python.exe` (not `pythonw.exe`) via `realpath`. Console flashes are suppressed by `sitecustomize.py` (`CREATE_NO_WINDOW`). [[src/main/installer.ts#buildHermesChildEnv]] sets `PYTHONPATH` to the bundled site-packages. [[src/main/installer.ts#getHermesPythonSpawnPath]] re-resolves the interpreter at spawn time so a dev session started before `prepare-runtime` can recover once the bundle exists.
 
 ## Desktop-core (optional)
 
-The local `desktop-core/` Python package (when present) installs the `core` module plus OCR extras (`onnxruntime`, `rapidocr_onnxruntime`). `prepare-runtime` skips it when the directory is absent and verifies only `hermes_cli`, `playwright`, and `pymupdf`.
+The `desktop-core/` package (when present) installs `core` plus OCR extras; absent trees skip that install step.
+
+`prepare-runtime` installs `onnxruntime` / `rapidocr_onnxruntime` when `desktop-core/` exists, otherwise verifies only `hermes_cli`, `playwright`, and `pymupdf`.
 
 ## Desktop relay plugins
 

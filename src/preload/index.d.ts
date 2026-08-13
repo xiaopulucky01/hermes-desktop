@@ -811,6 +811,17 @@ interface HermesAPI {
       contextFolder: string | null;
     }>
   >;
+  getCachedSessionsByIds: (ids: string[]) => Promise<
+    Array<{
+      id: string;
+      title: string;
+      startedAt: number;
+      source: string;
+      messageCount: number;
+      model: string;
+      contextFolder: string | null;
+    }>
+  >;
   syncSessionCache: () => Promise<
     Array<{
       id: string;

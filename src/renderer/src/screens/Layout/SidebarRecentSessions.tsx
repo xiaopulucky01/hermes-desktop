@@ -32,6 +32,8 @@ interface RecentSession {
 
 // ChatGPT-style paged conversation list under the pinned app navigation.
 export const RECENT_SESSIONS_PAGE_SIZE = 30;
+/** How many pinned rows stay visible before the pinned section scrolls. */
+export const PINNED_VISIBLE_ROWS = 10;
 
 // Re-sync cadence while the list is visible. Deliberately slower than the
 // Sessions screen (30s) — the sidebar is always on screen, so this interval
@@ -106,6 +108,56 @@ function sameSessions(a: RecentSession[], b: RecentSession[]): boolean {
     }
   }
   return true;
+}
+
+/**
+ * Ensure every pinned id present in `pinnedRows`/`pool` is in the sidebar
+ * session list even when it falls outside the first recent page.
+ */
+// @lat: [[sidebar-navigation#Pinned sessions on open]]
+export function mergePinnedIntoSessionPage(
+  page: RecentSession[],
+  pinnedIds: ReadonlySet<string>,
+  pool: ReadonlyArray<{
+    id: string;
+    title: string;
+    contextFolder?: string | null;
+  }>,
+): RecentSession[] {
+  if (pinnedIds.size === 0) return page;
+  const seen = new Set(page.map((s) => s.id));
+  const extras: RecentSession[] = [];
+  for (const s of pool) {
+    if (!pinnedIds.has(s.id) || seen.has(s.id)) continue;
+    seen.add(s.id);
+    extras.push({
+      id: s.id,
+      title: s.title,
+      contextFolder: s.contextFolder ?? null,
+    });
+  }
+  if (extras.length === 0) return page;
+  return [...extras, ...page];
+}
+
+/** Unpinned, non-project rows — the Chats section headcount. */
+export function countSidebarChats(
+  pool: ReadonlyArray<{
+    id: string;
+    contextFolder?: string | null;
+  }>,
+  pinnedIds: ReadonlySet<string>,
+): number {
+  let n = 0;
+  const seen = new Set<string>();
+  for (const s of pool) {
+    if (seen.has(s.id)) continue;
+    seen.add(s.id);
+    if (pinnedIds.has(s.id)) continue;
+    if (s.contextFolder?.trim()) continue;
+    n += 1;
+  }
+  return n;
 }
 
 function folderName(path: string): string {
@@ -186,6 +238,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   // True when the profile has more cache rows than the sidebar has loaded.
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** Growing catalog of known sessions for accurate section counts across pages. */
+  const [catalog, setCatalog] = useState<RecentSession[]>([]);
   const [projectsOpen, setProjectsOpen] = useState(() =>
     readStoredOpen(PROJECTS_OPEN_KEY),
   );
@@ -215,6 +269,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const sessionsRef = useRef<RecentSession[]>([]);
   const hasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
+  const pinnedIdsRef = useRef(pinnedIds);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -229,8 +284,37 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   }, [editingId]);
 
   useEffect(() => {
+    pinnedIdsRef.current = pinnedIds;
+  }, [pinnedIds]);
+
+  useEffect(() => {
     storePinned(pinnedIds);
   }, [pinnedIds]);
+
+  const rememberCatalog = useCallback(
+    (
+      pool: ReadonlyArray<{
+        id: string;
+        title: string;
+        contextFolder?: string | null;
+      }>,
+    ): void => {
+      if (pool.length === 0) return;
+      setCatalog((prev) => {
+        const byId = new Map(prev.map((s) => [s.id, s]));
+        for (const s of pool) {
+          byId.set(s.id, {
+            id: s.id,
+            title: s.title,
+            contextFolder: s.contextFolder ?? null,
+          });
+        }
+        const next = Array.from(byId.values());
+        return sameSessions(prev, next) ? prev : next;
+      });
+    },
+    [],
+  );
 
   const normalizeRows = useCallback(
     (
@@ -258,12 +342,16 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       }>,
     ): void => {
       setHasMore(list.length > RECENT_SESSIONS_PAGE_SIZE);
-      const next = normalizeRows(list);
-      // Skip the state update (and re-render) when nothing changed — the
-      // common case for periodic refreshes.
+      rememberCatalog(list);
+      const page = normalizeRows(list);
+      const next = mergePinnedIntoSessionPage(
+        page,
+        pinnedIdsRef.current,
+        list,
+      );
       setSessions((prev) => (sameSessions(prev, next) ? prev : next));
     },
-    [normalizeRows],
+    [normalizeRows, rememberCatalog],
   );
 
   const applyLoadedWindow = useCallback(
@@ -279,11 +367,41 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         sessionsRef.current.length,
       );
       setHasMore(list.length > loadedLimit);
-      const next = normalizeRows(list, loadedLimit);
+      rememberCatalog(list);
+      const page = normalizeRows(list, loadedLimit);
+      const next = mergePinnedIntoSessionPage(
+        page,
+        pinnedIdsRef.current,
+        list,
+      );
       setSessions((prev) => (sameSessions(prev, next) ? prev : next));
     },
-    [normalizeRows],
+    [normalizeRows, rememberCatalog],
   );
+
+  const hydratePinnedSessions = useCallback(async (): Promise<void> => {
+    const ids = Array.from(pinnedIdsRef.current);
+    if (ids.length === 0) return;
+    const missing = ids.filter(
+      (id) => !sessionsRef.current.some((s) => s.id === id),
+    );
+    if (missing.length === 0) return;
+    try {
+      const rows = await window.hermesAPI.getCachedSessionsByIds(missing);
+      if (rows.length === 0) return;
+      rememberCatalog(rows);
+      setSessions((prev) => {
+        const next = mergePinnedIntoSessionPage(
+          prev,
+          pinnedIdsRef.current,
+          rows,
+        );
+        return sameSessions(prev, next) ? prev : next;
+      });
+    } catch {
+      /* pinned hydrate is best-effort */
+    }
+  }, [rememberCatalog]);
 
   const appendPage = useCallback(
     (
@@ -294,6 +412,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       }>,
     ): void => {
       setHasMore(list.length > RECENT_SESSIONS_PAGE_SIZE);
+      rememberCatalog(list);
       const page = normalizeRows(list);
       if (page.length === 0) return;
       setSessions((prev) => {
@@ -305,7 +424,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
         return sameSessions(prev, next) ? prev : next;
       });
     },
-    [normalizeRows],
+    [normalizeRows, rememberCatalog],
   );
 
   const refresh = useCallback(
@@ -367,6 +486,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       } catch {
         /* ignore cache read errors */
       }
+      if (!cancelled) await hydratePinnedSessions();
       lastRefreshRef.current = Date.now();
       try {
         const synced = await window.hermesAPI.syncSessionCache();
@@ -374,11 +494,12 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       } catch {
         // cache read above already painted something
       }
+      if (!cancelled) await hydratePinnedSessions();
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, activeProfile, applyFirstPage]);
+  }, [activeProfile, applyFirstPage, hydratePinnedSessions, open]);
 
   // While open: pick up background sessions (gateway, cron, other devices)
   // on focus and on a slow timer. No listeners or timers at all when closed.
@@ -439,6 +560,8 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   useEffect(() => {
     if (prevProfileRef.current === activeProfile) return;
     prevProfileRef.current = activeProfile;
+    setCatalog([]);
+    setSessions([]);
     void refresh(true);
   }, [activeProfile, refresh]);
 
@@ -457,6 +580,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     () =>
       groupSessionsByWorkspace(sessions.filter((s) => !pinnedIds.has(s.id))),
     [sessions, pinnedIds],
+  );
+  // Prefer the growing catalog so the Chats badge stays accurate across pages.
+  const chatCount = useMemo(
+    () =>
+      countSidebarChats(
+        catalog.length > 0 ? catalog : sessions,
+        pinnedIds,
+      ),
+    [catalog, sessions, pinnedIds],
   );
 
   // Every distinct project folder currently in use, so "Move to project" lists
@@ -520,12 +652,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       setSessions((prev) =>
         prev.map((s) => (s.id === id ? { ...s, title: trimmed } : s)),
       );
+      setCatalog((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title: trimmed } : s)),
+      );
       if (editingIdRef.current === id) cancelRename();
       try {
         await window.hermesAPI.updateSessionTitle(id, trimmed);
       } catch (err) {
         console.error("Failed to rename session", id, err);
         setSessions((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, title: previous } : s)),
+        );
+        setCatalog((prev) =>
           prev.map((s) => (s.id === id ? { ...s, title: previous } : s)),
         );
       }
@@ -544,6 +682,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           s.id === id ? { ...s, contextFolder: normalized } : s,
         ),
       );
+      setCatalog((prev) =>
+        prev.map((s) =>
+          s.id === id ? { ...s, contextFolder: normalized } : s,
+        ),
+      );
       try {
         await window.hermesAPI.setSessionContextFolder(id, normalized);
         // Other surfaces (chat view, Sessions screen) listen for this to
@@ -554,6 +697,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       } catch (err) {
         console.error("Failed to move session to project", id, err);
         setSessions((prev) =>
+          prev.map((s) =>
+            s.id === id ? { ...s, contextFolder: previous } : s,
+          ),
+        );
+        setCatalog((prev) =>
           prev.map((s) =>
             s.id === id ? { ...s, contextFolder: previous } : s,
           ),
@@ -579,6 +727,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     async (id: string): Promise<void> => {
       setDeleting(true);
       setSessions((prev) => prev.filter((s) => s.id !== id));
+      setCatalog((prev) => prev.filter((s) => s.id !== id));
       setPinnedIds((prev) => {
         if (!prev.has(id)) return prev;
         const next = new Set(prev);
@@ -764,6 +913,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               tabIndex={expanded ? 0 : -1}
             >
               <span>{t("navigation.pinned")}</span>
+              <span className="sidebar-recent-section-count">
+                {pinnedSessions.length}
+              </span>
               {pinnedOpen ? (
                 <ChevronDown
                   className="sidebar-recent-disclosure-icon"
@@ -782,9 +934,19 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
               }`}
             >
               <div className="sidebar-recent-collapse-inner">
-                {pinnedSessions.map((s) =>
-                  renderSessionButton(s, false, expanded && pinnedOpen, true),
-                )}
+                <div
+                  className="sidebar-recent-pinned-scroll"
+                  data-pinned-visible-rows={PINNED_VISIBLE_ROWS}
+                >
+                  {pinnedSessions.map((s) =>
+                    renderSessionButton(
+                      s,
+                      false,
+                      expanded && pinnedOpen,
+                      true,
+                    ),
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -871,6 +1033,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
             tabIndex={expanded ? 0 : -1}
           >
             <span>{t("navigation.chats")}</span>
+            <span className="sidebar-recent-section-count">{chatCount}</span>
             {chatsOpen ? (
               <ChevronDown
                 className="sidebar-recent-disclosure-icon"

@@ -222,6 +222,7 @@ import {
 import {
   syncSessionCache,
   listCachedSessions,
+  getCachedSessionsByIds,
   updateSessionTitle,
 } from "../session-cache";
 import {
@@ -2416,6 +2417,36 @@ export function registerIpcHandlers(context: IpcContext): void {
           activeSshProfile(),
         );
       return listCachedSessions(limit, offset);
+    },
+  );
+  ipcMain.handle(
+    "get-cached-sessions-by-ids",
+    async (_event, ids?: unknown) => {
+      const idList = Array.isArray(ids)
+        ? ids.filter((id): id is string => typeof id === "string" && !!id)
+        : [];
+      if (idList.length === 0) return [];
+      const want = new Set(idList);
+      const pick = <T extends { id: string; startedAt: number }>(
+        rows: T[],
+      ): T[] =>
+        rows
+          .filter((s) => want.has(s.id))
+          .sort((a, b) => b.startedAt - a.startedAt);
+
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        return pick(await remoteListCachedSessions(conn, 2000, 0));
+      }
+      if (conn.mode === "ssh" && conn.ssh) {
+        return withSshDashboardSessions(
+          conn,
+          async (config) => pick(await remoteListCachedSessions(config, 2000, 0)),
+          async () => pick(await sshListCachedSessions(conn.ssh, 2000, 0)),
+          activeSshProfile(),
+        );
+      }
+      return getCachedSessionsByIds(idList);
     },
   );
   ipcMain.handle("sync-session-cache", () => {

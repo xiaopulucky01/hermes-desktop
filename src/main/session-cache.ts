@@ -258,6 +258,16 @@ export function listCachedSessions(limit = 50, offset = 0): CachedSession[] {
   return cache.sessions.slice(offset, offset + limit);
 }
 
+/** Resolve pinned (or other) session ids from the local cache without pagination. */
+export function getCachedSessionsByIds(ids: string[]): CachedSession[] {
+  if (ids.length === 0) return [];
+  const want = new Set(ids.filter(Boolean));
+  if (want.size === 0) return [];
+  const found = readCache().sessions.filter((s) => want.has(s.id));
+  found.sort((a, b) => b.startedAt - a.startedAt);
+  return found;
+}
+
 // Update title for a specific session
 export function updateSessionTitle(sessionId: string, title: string): void {
   const cache = readCache();

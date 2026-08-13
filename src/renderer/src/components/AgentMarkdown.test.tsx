@@ -156,6 +156,40 @@ describe("AgentMarkdown", () => {
     expect(container.textContent).not.toContain("||-------");
   });
 
+  it("renders glued bare numbered news-digest rows as a table", () => {
+    const markdown = [
+      "### 🤖 AI 与模型",
+      "",
+      "| 新闻 | 来源 |",
+      "|---|---|",
+      "1 | Claude 用户不满新增水印功能 | TechCrunch || 2 | AI 核能公司 Fermi 迎来新 CEO | TechCrunch || 3 | Lovable 确认新一轮融资 | TechCrunch |",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-table-wrap table")).not.toBeNull();
+    const rows = container.querySelectorAll("tr");
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(container.textContent).toContain("Claude 用户不满新增水印功能");
+    expect(container.textContent).toContain("Lovable 确认新一轮融资");
+    expect(container.textContent).not.toContain("||");
+  });
+
+  it("renders digest tables that use fullwidth pipes as a real table", () => {
+    const markdown = [
+      "**🤖 AI 与模型**",
+      "",
+      "｜ 新闻 ｜ 来源 ｜",
+      "｜---｜---｜",
+      "1 ｜ Claude 用户不满新增水印功能 ｜ TechCrunch ｜｜ 2 ｜ AI 核能公司 Fermi 迎来新 CEO ｜ TechCrunch ｜",
+    ].join("\n");
+
+    const { container } = render(<AgentMarkdown>{markdown}</AgentMarkdown>);
+    expect(container.querySelector(".chat-table-wrap table")).not.toBeNull();
+    expect(container.textContent).toContain("Claude 用户不满新增水印功能");
+    expect(container.textContent).not.toContain("｜");
+    expect(container.textContent).not.toContain("||");
+  });
+
   it("renders ASCII flowcharts as plain text without Prism", () => {
     const markdown = [
       "```",

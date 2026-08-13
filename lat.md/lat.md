@@ -22,9 +22,9 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[agent-sync]] — bidirectional sync of desktop profiles with the signed-in account's cloud agents (persona, memory, color, model/provider) via the backend's `/api/agents`; hash-based per-part conflict handling, no deletion propagation.
 - [[kanban]] — the JIRA-style multi-agent board tab; a thin client over the `hermes kanban` CLI with canonical status columns, an archived toggle, and focus/poll refresh.
 - [[analytics]] — privacy-first, opt-out usage analytics that POST anonymous events to the in-house Hermes analytics service, keyed by a per-install localStorage UUID; replaces the former PostHog integration.
-- [[bundled-runtime#Bundled runtime]] — the prepare-runtime Python bundle under `resources/python/`, including `[acp]` extras for IDE integration.
-- [[acp-integration#ACP integration]] — IDE integration via the Agent Client Protocol: a desktop-generated launcher script that spawns upstream `hermes acp` with the correct env for Zed, JetBrains, and other ACP clients.
-- [[a2a-integration#A2A integration]] — standalone A2A platform plugin in sibling `../hermes-a2a` (or packaged `resources/hermes-a2a`); auto-linked and gateway booted on app launch.
+- [[bundled-runtime]] — the prepare-runtime Python bundle under `resources/python/`, including `[acp]` extras for IDE integration.
+- [[acp-integration]] — IDE integration via the Agent Client Protocol: a desktop-generated launcher script that spawns upstream `hermes acp` with the correct env for Zed, JetBrains, and other ACP clients.
+- [[a2a-integration]] — standalone A2A platform plugin in sibling `../hermes-a2a` (or packaged `resources/hermes-a2a`); auto-linked and gateway booted on app launch.
 - [[agent-services]] — install, supervise, and auto-register A2A agent services under `hermes-ecosystem/agents/` (see [[ecosystem]]).
 - [[ecosystem]] — local install root, marketplace catalog URL, and separation from hermes-marketplace / bundled skills.
 - [[wallet-token-balances]] — profile-scoped Base mainnet wallets with encrypted recovery phrases, and on-chain ERC-20 token balance reads via ethers v6.

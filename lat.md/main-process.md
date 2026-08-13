@@ -50,7 +50,7 @@ The packaged renderer keeps its meta CSP aligned with the production response CS
 
 Because electron-vite emits a bundled main file at `out/main/index.js`, packaged renderer loading resolves `../renderer/index.html` from `__dirname` to reach `out/renderer/index.html`.
 
-Windows packaging (`npm run build:win` / `electron-builder --win`) runs [[scripts/fix-wincodesign-cache.mjs]] first. The Go `app-builder rcedit` helper always wants legacy `winCodeSign-2.6.0`, whose macOS `.dylib` symlinks fail to extract without Developer Mode; the script seeds `%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/winCodeSign-2.6.0` so DownloadArtifact skips that extract. `toolsets.winCodeSign: "1.1.0"` in [[electron-builder.yml]] still prefers the split Windows tool zips for JS-side tool lookups.
+Windows packaging (`npm run build:win` / `electron-builder --win`) runs `scripts/fix-wincodesign-cache.mjs` first. The Go `app-builder rcedit` helper always wants legacy `winCodeSign-2.6.0`, whose macOS `.dylib` symlinks fail to extract without Developer Mode; the script seeds `%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/winCodeSign-2.6.0` so DownloadArtifact skips that extract. `toolsets.winCodeSign: "1.1.0"` in `electron-builder.yml` still prefers the split Windows tool zips for JS-side tool lookups.
 
 ## App Chrome Helpers
 

@@ -593,6 +593,80 @@ describe("normalizeAgentMarkdown", () => {
     );
   });
 
+  it("splits glued bare numbered digest rows after a table header", () => {
+    const raw = [
+      "### 🤖 AI 与模型",
+      "",
+      "| 新闻 | 来源 |",
+      "|---|---|",
+      "1 | Claude 用户不满新增水印功能 — Anthropic 推出的新水印会标记 AI 生成内容，部分用户认为这像是在“抓作弊” | TechCrunch || 2 | AI 核能公司 Fermi 迎来新 CEO | TechCrunch || 3 | Lovable 确认新一轮 4 亿美元融资，估值达 133 亿美元 | TechCrunch |",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| 新闻 | 来源 |");
+    expect(out).toMatch(/\| --- \| --- \|/);
+    expect(out).toContain(
+      "| 1. Claude 用户不满新增水印功能 — Anthropic 推出的新水印会标记 AI 生成内容，部分用户认为这像是在“抓作弊” | TechCrunch |",
+    );
+    expect(out).toContain("| 2. AI 核能公司 Fermi 迎来新 CEO | TechCrunch |");
+    expect(out).toContain(
+      "| 3. Lovable 确认新一轮 4 亿美元融资，估值达 133 亿美元 | TechCrunch |",
+    );
+    expect(out).not.toContain("||");
+  });
+
+  it("splits a two-row bare numbered digest with a single double-pipe glue", () => {
+    const raw = [
+      "| 新闻 | 来源 |",
+      "|---|---|",
+      "4 | Google 将 Pixel 11 发布会定在 8 月 13 日 | TechCrunch || 5 | Amazon 挖来前 Apple 高管 Panos Panay | TechCrunch |",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain(
+      "| 4. Google 将 Pixel 11 发布会定在 8 月 13 日 | TechCrunch |",
+    );
+    expect(out).toContain(
+      "| 5. Amazon 挖来前 Apple 高管 Panos Panay | TechCrunch |",
+    );
+    expect(out).not.toContain("||");
+  });
+
+  it("repairs digest tables that use fullwidth pipes", () => {
+    const raw = [
+      "｜ 新闻 ｜ 来源 ｜",
+      "｜---｜---｜",
+      "1 ｜ Claude 用户不满新增水印功能 ｜ TechCrunch ｜｜ 2 ｜ AI 核能公司 Fermi 迎来新 CEO ｜ TechCrunch ｜",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| 新闻 | 来源 |");
+    expect(out).toContain("| 1. Claude 用户不满新增水印功能 | TechCrunch |");
+    expect(out).toContain("| 2. AI 核能公司 Fermi 迎来新 CEO | TechCrunch |");
+    expect(out).not.toContain("｜");
+    expect(out).not.toContain("||");
+  });
+
+  it("repairs digest tables glued with CR-only line endings", () => {
+    const raw = [
+      "| 新闻 | 来源 |",
+      "|---|---|",
+      "1 | Claude news | TechCrunch || 2 | Fermi | TechCrunch |",
+    ].join("\r");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| 1. Claude news | TechCrunch |");
+    expect(out).toContain("| 2. Fermi | TechCrunch |");
+    expect(out).not.toContain("||");
+  });
+
+  it("folds numbered cells when separator is glued to digest rows", () => {
+    const raw = [
+      "| 新闻 | 来源 |",
+      "|---|------|| 1 | Claude 用户不满新增水印功能 | TechCrunch || 2 | AI 核能公司 Fermi 迎来新 CEO | TechCrunch |",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| 1. Claude 用户不满新增水印功能 | TechCrunch |");
+    expect(out).toContain("| 2. AI 核能公司 Fermi 迎来新 CEO | TechCrunch |");
+    expect(out).not.toContain("||");
+  });
+
   it("inserts a separator row when the model omits it", () => {
     const raw = [
       "## 技术栈选择",
@@ -1019,6 +1093,21 @@ describe("normalizeAgentMarkdown", () => {
     const raw = "为什么不能完全1. **Hermes Memory 的核心价值查询###海量、长期、需要";
     const out = normalizeAgentMarkdown(raw);
     expect(out).toMatch(/###\s+海量/);
+  });
+
+  it("does not split a | # | table header cell into an ATX heading", () => {
+    const raw = [
+      "## 🤖 AI 与模型",
+      "",
+      "| # | 新闻 | 来源 |",
+      "|---|------|------|",
+      '| 1 | **Claude 用户不满新增水印功能** — Anthropic 推出的新水印 | TechCrunch |',
+      "| 2 | **AI 核能公司 Fermi 迎来新 CEO** | TechCrunch |",
+    ].join("\n");
+    const out = normalizeAgentMarkdown(raw);
+    expect(out).toContain("| # | 新闻 | 来源 |");
+    expect(out).not.toMatch(/^# \| 新闻/m);
+    expect(out).not.toMatch(/^\|\s*$/m);
   });
 
   it("collapses entity-relation chains split across arrow-only lines", () => {
