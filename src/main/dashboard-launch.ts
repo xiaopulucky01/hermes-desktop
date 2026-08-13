@@ -30,3 +30,20 @@ export function buildLocalDashboardCliArgs(
 
   return args;
 }
+
+/**
+ * Local chat's preferred `/api/ws` backend. Upstream documents that desktop
+ * must spawn `hermes serve` (headless) — never `dashboard` — so we skip the
+ * SPA npm install/build that blocked chat when Node/web dist were unavailable.
+ */
+// @lat: [[main-process#Local TUI gateway]]
+export function buildTuiGatewayCliArgs(port: number): string[] {
+  return [
+    "serve",
+    "--no-open",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    String(port),
+  ];
+}

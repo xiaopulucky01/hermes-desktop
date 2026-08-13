@@ -970,7 +970,7 @@ export function useDashboardChatTransport({
 
   useEffect(() => {
     appliedModelRef.current = null;
-  }, [model, provider]);
+  }, [model, modelBaseUrl, provider]);
 
   useEffect(() => {
     clientGenerationRef.current += 1;
@@ -1035,7 +1035,10 @@ export function useDashboardChatTransport({
         event,
         {
           activeTurn: activeTurnRef.current,
-          renderAssistantDeltas: connectionMode === "local",
+          // Always paint message.delta so TTFT is visible on local and
+          // remote/SSH. Garbled remote streams are reconciled on
+          // message.complete via mergeStreamedWithFinal (#746).
+          renderAssistantDeltas: true,
         },
       );
       reasoningSegmentClosedRef.current = next.reasoningSegmentClosed;
@@ -1324,6 +1327,24 @@ export function useDashboardChatTransport({
     ): Promise<string> => {
       const command = dashboardModelCommand(provider, model);
       if (!command) return sessionId;
+
+      // Skip model.options / slash RPCs when this connection already validated
+      // the same session+model. Cleared on model/provider/session/connection
+      // changes — without this every turn paid 1–2 round-trips before submit.
+      const applied = appliedModelRef.current;
+      if (applied) {
+        const sep = applied.indexOf("\n");
+        const lastSep = applied.lastIndexOf("\n");
+        if (
+          sep > 0 &&
+          lastSep > sep &&
+          applied.slice(0, sep) === sessionId &&
+          applied.slice(lastSep + 1) === model
+        ) {
+          return sessionId;
+        }
+      }
+
       const resetRuntimeSession = async (
         targetSessionId: string,
       ): Promise<string> => {
@@ -1354,9 +1375,15 @@ export function useDashboardChatTransport({
           before,
         );
 
+        // Live session already on the requested model — do not rebuild or
+        // re-run /model (the old custom path reset on every turn).
+        if (dashboardModelMatches(dashboardProvider, model, before)) {
+          appliedModelRef.current = `${targetSessionId}\n${dashboardProvider}\n${model}`;
+          return targetSessionId;
+        }
+
         if (
           storedSessionIdRef.current &&
-          !dashboardModelMatches(dashboardProvider, model, before) &&
           (provider === "custom" ||
             (before.provider || "").toLowerCase().startsWith("custom"))
         ) {
@@ -1398,16 +1425,13 @@ export function useDashboardChatTransport({
         const resolvedCommand = dashboardModelCommand(dashboardProvider, model);
         if (!resolvedCommand) return targetSessionId;
         const key = `${targetSessionId}\n${dashboardProvider}\n${model}`;
-        let slashResponse: SlashExecResponse | null = null;
-        if (appliedModelRef.current !== key) {
-          slashResponse = await client.request<SlashExecResponse>(
-            "slash.exec",
-            {
-              session_id: targetSessionId,
-              command: resolvedCommand,
-            },
-          );
-        }
+        const slashResponse = await client.request<SlashExecResponse>(
+          "slash.exec",
+          {
+            session_id: targetSessionId,
+            command: resolvedCommand,
+          },
+        );
 
         const live = await client.request<ModelOptionsResponse>(
           "model.options",
@@ -1607,10 +1631,24 @@ export function useDashboardChatTransport({
           continuationItems = [];
         }
         await recordContinuationItems(continuationItems);
+        // Overlap router-hint IPC with model ensure + attachment sync so it
+        // does not add serial latency before prompt.submit.
+        const hintPromise = window.hermesAPI
+          .formatRouterHint?.(
+            typeof dashboardText === "string" ? dashboardText : text,
+            3,
+          )
+          ?.catch(() => null);
         const selectedSessionId = await ensureSelectedModel(
           client,
           runtimeSessionId,
         );
+        // ensureSelectedModel may rebuild the runtime session (custom
+        // provider recovery); keep the ref aligned or the next turn recreates
+        // again from the stale id.
+        if (selectedSessionId !== runtimeSessionIdRef.current) {
+          runtimeSessionIdRef.current = selectedSessionId;
+        }
         await recordContinuationItems(mergePendingRecoveredContinuation([]));
         const syncedAttachments = await syncDashboardAttachments(
           client,
@@ -1632,10 +1670,7 @@ export function useDashboardChatTransport({
         // older gateways — routing then falls back to default LLM selection.
         let instructions: string | undefined;
         try {
-          const hint = await window.hermesAPI.formatRouterHint?.(
-            typeof dashboardText === "string" ? dashboardText : text,
-            3,
-          );
+          const hint = hintPromise ? await hintPromise : null;
           if (hint?.trim()) instructions = hint.trim();
         } catch {
           /* ignore router failures */
@@ -1686,6 +1721,9 @@ export function useDashboardChatTransport({
         const client = await ensureClient();
         const runtimeSessionId = await ensureRuntimeSession(client);
         const sessionId = await ensureSelectedModel(client, runtimeSessionId);
+        if (sessionId !== runtimeSessionIdRef.current) {
+          runtimeSessionIdRef.current = sessionId;
+        }
         return await executeSlash({
           command,
           sessionId,
@@ -1721,6 +1759,9 @@ export function useDashboardChatTransport({
         const client = await ensureClient();
         const runtimeSessionId = await ensureRuntimeSession(client);
         const sessionId = await ensureSelectedModel(client, runtimeSessionId);
+        if (sessionId !== runtimeSessionIdRef.current) {
+          runtimeSessionIdRef.current = sessionId;
+        }
         const r = await client.request<{ task_id?: string }>(
           "prompt.background",
           {

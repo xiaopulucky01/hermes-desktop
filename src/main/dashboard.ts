@@ -6,18 +6,18 @@ import https from "https";
 import net from "net";
 import { homedir } from "os";
 import { join } from "path";
-import { getConnectionConfig, type ConnectionConfig } from "./config";
+import { getConnectionConfig, readEnv, type ConnectionConfig } from "./config";
 import {
   getEnhancedPath,
   hermesCliArgs,
-  HERMES_HOME,
   HERMES_PYTHON,
   HERMES_REPO,
 } from "./installer";
-import { buildLocalDashboardCliArgs } from "./dashboard-launch";
+import { buildTuiGatewayCliArgs } from "./dashboard-launch";
 import { dashboardWebSocketUrlForRenderer } from "./dashboard-websocket-relay";
 import { ensureLocalDashboardCompatibility } from "./hermes-agent-compat";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import { providerListSafe } from "./secrets";
 import {
   buildRemoteOAuthWsUrl,
   mintRemoteOAuthWsTicket,
@@ -61,6 +61,8 @@ interface ManagedDashboard {
 }
 
 const dashboards = new Map<string, ManagedDashboard>();
+/** Collapse concurrent local startDashboard calls into one serve spawn. */
+const localStartInFlight = new Map<string, Promise<DashboardStatus>>();
 
 function resolveProfile(profile?: string): string | undefined {
   return normalizeProfileName(profile ?? getActiveProfileNameSync());
@@ -68,6 +70,47 @@ function resolveProfile(profile?: string): string | undefined {
 
 function profileKey(profile?: string): string {
   return resolveProfile(profile) ?? "default";
+}
+
+/** Env for headless `hermes serve` — same key resolution as the TUI gateway. */
+function localChatServeEnv(
+  profile: string | undefined,
+  token: string,
+): Record<string, string> {
+  const resolved = resolveProfile(profile);
+  const envPathDelimiter = process.platform === "win32" ? ";" : ":";
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    PATH: getEnhancedPath(),
+    HOME: process.env.HOME || homedir(),
+    HERMES_HOME: profileHome(resolved),
+    HERMES_PYTHON_SRC_ROOT: HERMES_REPO,
+    HERMES_DASHBOARD_SESSION_TOKEN: token,
+    HERMES_DASHBOARD_TUI: "1",
+    HERMES_DESKTOP: "1",
+    PYTHONUNBUFFERED: "1",
+  };
+  const existingPythonPath = env.PYTHONPATH?.trim();
+  env.PYTHONPATH = existingPythonPath
+    ? `${HERMES_REPO}${envPathDelimiter}${existingPythonPath}`
+    : HERMES_REPO;
+  if (resolved) env.HERMES_PROFILE = resolved;
+  for (const [key, value] of Object.entries(readEnv(profile))) {
+    if (value) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(providerListSafe(profile))) {
+    if (value && !env[key]) env[key] = value;
+  }
+  return env;
+}
+
+/** Direct loopback connection for main-process clients (not the renderer relay). */
+export function getManagedLocalDashboardConnection(
+  profile?: string,
+): DashboardConnection | null {
+  const managed = getManagedDashboard(profile);
+  if (!managed || managed.connection.mode !== "local") return null;
+  return { ...managed.connection, alreadyRunning: true };
 }
 
 function dashboardWsUrl(baseUrl: string, token: string): string {
@@ -181,10 +224,6 @@ function dashboardLogPath(profile: string | undefined): string {
   const dir = profileHome(profile);
   mkdirSync(dir, { recursive: true });
   return join(dir, "dashboard-stderr.log");
-}
-
-function dashboardHasPrebuiltWebDist(): boolean {
-  return existsSync(join(HERMES_REPO, "hermes_cli", "web_dist", "index.html"));
 }
 
 async function getFreePort(): Promise<number> {
@@ -604,6 +643,38 @@ export async function startDashboard(
     };
   }
 
+  const key = profileKey(profile);
+  const inFlight = localStartInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const pending = startLocalChatServe(profile).finally(() => {
+    if (localStartInFlight.get(key) === pending) {
+      localStartInFlight.delete(key);
+    }
+  });
+  localStartInFlight.set(key, pending);
+  return pending;
+}
+
+/**
+ * Local chat `/api/ws` backend: headless `hermes serve` only.
+ * Never `hermes dashboard` — a missing SPA/web_dist used to block every send
+ * for up to 180s while npm built the UI.
+ */
+// @lat: [[main-process#Local TUI gateway]]
+async function startLocalChatServe(
+  profile?: string,
+): Promise<DashboardStatus> {
+  const existing = getManagedDashboard(profile);
+  if (existing) {
+    return {
+      supported: true,
+      running: true,
+      connection: { ...existing.connection, alreadyRunning: true },
+      logPath: existing.connection.logPath,
+    };
+  }
+
   const unsupported = unsupportedReasonForLocalSpawn();
   if (unsupported) {
     return { supported: false, running: false, error: unsupported };
@@ -619,30 +690,23 @@ export async function startDashboard(
   const resolvedProfile = resolveProfile(profile);
   const key = profileKey(profile);
   const token = randomBytes(24).toString("hex");
+  // OS-assigned free port — avoids the 9120 TOCTOU race with zombie serves.
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const logPath = dashboardLogPath(resolvedProfile);
   const stderrFd = openSync(logPath, "a");
-  const hasPrebuiltWebDist = dashboardHasPrebuiltWebDist();
-  const cliArgs = buildLocalDashboardCliArgs(resolvedProfile, port, {
-    skipBuild: hasPrebuiltWebDist,
-  });
+  const serveArgs = buildTuiGatewayCliArgs(port);
+  const cliArgs = hermesCliArgs(
+    resolvedProfile
+      ? ["--profile", resolvedProfile, ...serveArgs]
+      : serveArgs,
+  );
 
   let proc: ChildProcess;
   try {
-    proc = spawn(HERMES_PYTHON, hermesCliArgs(cliArgs), {
+    proc = spawn(HERMES_PYTHON, cliArgs, {
       cwd: HERMES_REPO,
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: process.env.HOME || homedir(),
-        HERMES_HOME,
-        HERMES_DASHBOARD_SESSION_TOKEN: token,
-        HERMES_DESKTOP: "1",
-        ...(hasPrebuiltWebDist
-          ? { HERMES_WEB_DIST: join(HERMES_REPO, "hermes_cli", "web_dist") }
-          : {}),
-      },
+      env: localChatServeEnv(resolvedProfile, token),
       stdio: ["ignore", "ignore", stderrFd],
       detached: false,
       ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -676,10 +740,7 @@ export async function startDashboard(
   });
 
   try {
-    await waitForDashboardReady(
-      connection,
-      hasPrebuiltWebDist ? 45_000 : 180_000,
-    );
+    await waitForDashboardReady(connection, 45_000);
     await probeDashboardWebSocket(connection, 5_000);
   } catch (err) {
     dashboards.delete(key);

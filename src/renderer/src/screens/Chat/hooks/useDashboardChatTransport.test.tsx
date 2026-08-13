@@ -689,6 +689,92 @@ describe("useDashboardChatTransport context gauge estimate (no usage payload)", 
     expect(usage?.contextTokens).toBe(45000);
   });
 
+  it("skips model.options on subsequent turns once the model is applied", async () => {
+    // @lat: [[chat-commands#First-token send path]]
+    const requests: string[] = [];
+    dashboardMock.request.mockImplementation(async (method) => {
+      requests.push(method);
+      if (method === "session.create") {
+        return { session_id: "live-fast", stored_session_id: "stored-fast" };
+      }
+      if (method === "model.options") {
+        return {
+          model: "gpt-test",
+          provider: "openai",
+          providers: [],
+        };
+      }
+      return {};
+    });
+
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+
+    await act(async () => {
+      api.setProvider?.("openai");
+      api.setModel?.("gpt-test");
+    });
+
+    await act(async () => {
+      await api.send?.("first");
+    });
+    const optionsAfterFirst = requests.filter(
+      (method) => method === "model.options",
+    ).length;
+    expect(optionsAfterFirst).toBeGreaterThan(0);
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: { status: "completed", final_response: "ok" },
+        session_id: "live-fast",
+        type: "message.complete",
+      });
+    });
+
+    const beforeSecond = requests.length;
+    await act(async () => {
+      await api.send?.("second");
+    });
+    const secondTurnMethods = requests.slice(beforeSecond);
+    expect(secondTurnMethods).not.toContain("model.options");
+    expect(secondTurnMethods).toContain("prompt.submit");
+  });
+
+  it("renders remote assistant deltas while the turn streams", async () => {
+    // @lat: [[chat-commands#First-token send path]]
+    dashboardMock.request.mockImplementation(async (method) => {
+      if (method === "session.create") {
+        return { session_id: "live-remote", stored_session_id: "stored-remote" };
+      }
+      if (method === "model.options") {
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      }
+      return {};
+    });
+
+    const api: HarnessApi = {};
+    render(<Harness api={api} initialConnectionMode="remote" />);
+
+    await act(async () => {
+      await api.send?.("stream please");
+    });
+
+    await act(async () => {
+      dashboardMock.onEvent?.({
+        payload: { text: "Hel" },
+        session_id: "live-remote",
+        type: "message.delta",
+      });
+    });
+
+    await waitFor(() => {
+      const agent = api.messages?.find(
+        (m) => m.role === "agent" && "content" in m && Boolean(m.content),
+      ) as { content?: string } | undefined;
+      expect(agent?.content).toContain("Hel");
+    });
+  });
+
   it("does not fabricate usage for a failed turn without usage", async () => {
     const setUsage = vi.fn() as SetUsageMock;
     const api: HarnessApi = {};

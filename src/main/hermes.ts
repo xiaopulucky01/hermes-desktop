@@ -16,7 +16,6 @@ import { join } from "path";
 import { homedir, tmpdir } from "os";
 import http from "http";
 import https from "https";
-import net from "net";
 import WebSocket from "ws";
 import {
   HERMES_HOME,
@@ -56,6 +55,7 @@ import { getSecret } from "./secrets";
 import { readModels } from "./models";
 import { providerListSafe } from "./secrets";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import { startDashboard } from "./dashboard";
 import { type Attachment, escapeXmlAttr } from "../shared/attachments";
 import { type SessionModelOverride } from "../shared/model-override";
 import {
@@ -491,86 +491,23 @@ interface GatewayPending {
 
 type GatewayEventHandler = (event: GatewayEvent) => void;
 
-const DASHBOARD_GATEWAY_PORT_FLOOR = 9120;
-const DASHBOARD_GATEWAY_PORT_CEILING = 9199;
-
-function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.once("error", () => resolve(false));
-    server.once("listening", () => {
-      server.close(() => resolve(true));
-    });
-    server.listen(port, "127.0.0.1");
-  });
-}
-
-async function pickDashboardPort(): Promise<number> {
-  for (
-    let port = DASHBOARD_GATEWAY_PORT_FLOOR;
-    port <= DASHBOARD_GATEWAY_PORT_CEILING;
-    port += 1
-  ) {
-    if (await isPortAvailable(port)) return port;
-  }
-  throw new Error(
-    `No free localhost port in ${DASHBOARD_GATEWAY_PORT_FLOOR}-${DASHBOARD_GATEWAY_PORT_CEILING}`,
-  );
-}
-
-function isDashboardReady(baseUrl: string, token: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const req = http.request(
-      `${baseUrl}/api/status`,
-      {
-        method: "GET",
-        headers: { "X-Hermes-Session-Token": token },
-        timeout: 1500,
-      },
-      (res) => {
-        resolve((res.statusCode || 500) < 400);
-        res.resume();
-      },
-    );
-    req.on("error", () => resolve(false));
-    req.on("timeout", () => {
-      req.destroy();
-      resolve(false);
-    });
-    req.end();
-  });
-}
-
-async function waitForDashboardReady(
-  baseUrl: string,
-  token: string,
-  timeoutMs: number,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await isDashboardReady(baseUrl, token)) return;
-    await delay(500);
-  }
-  throw new Error("Hermes dashboard gateway did not become ready");
-}
+/** Cooldown after a failed local `hermes serve` boot so chat falls back to API
+ * quickly instead of re-running a broken start on every send. */
+const TUI_GATEWAY_START_FAIL_COOLDOWN_MS = 60_000;
 
 class TuiGatewayClient {
   private handlers = new Set<GatewayEventHandler>();
   private nextId = 0;
   private pending = new Map<string, GatewayPending>();
-  private port = 0;
-  private proc: ChildProcess | null = null;
   private recentEvents: GatewayEvent[] = [];
   private ready: Promise<void> | null = null;
   private readyReject: ((error: Error) => void) | null = null;
   private readyResolve: (() => void) | null = null;
-  private token = "";
+  private lastStartError: Error | null = null;
+  private lastStartFailedAt = 0;
   private ws: WebSocket | null = null;
 
-  constructor(
-    private readonly key: string,
-    private readonly env: Record<string, string>,
-  ) {}
+  constructor(private readonly key: string) {}
 
   onEvent(handler: GatewayEventHandler): () => void {
     this.handlers.add(handler);
@@ -623,15 +560,28 @@ class TuiGatewayClient {
   async start(): Promise<void> {
     if (this.ready) return this.ready;
 
+    if (
+      this.lastStartError &&
+      Date.now() - this.lastStartFailedAt < TUI_GATEWAY_START_FAIL_COOLDOWN_MS
+    ) {
+      throw this.lastStartError;
+    }
+
     this.ready = new Promise<void>((resolve, reject) => {
       this.readyResolve = resolve;
       this.readyReject = reject;
     });
 
-    void this.startDashboardBackend()
-      .then(() => this.readyResolve?.())
+    void this.startServeBackend()
+      .then(() => {
+        this.lastStartError = null;
+        this.lastStartFailedAt = 0;
+        this.readyResolve?.();
+      })
       .catch((error) => {
         const err = error instanceof Error ? error : new Error(String(error));
+        this.lastStartError = err;
+        this.lastStartFailedAt = Date.now();
         this.readyReject?.(err);
         this.rejectPending(err);
         this.reset();
@@ -642,88 +592,25 @@ class TuiGatewayClient {
 
   stop(): void {
     this.ws?.close();
-    this.proc?.kill("SIGTERM");
     this.rejectPending(new Error("Hermes dashboard gateway stream stopped"));
+    this.lastStartError = null;
+    this.lastStartFailedAt = 0;
     this.reset();
   }
 
-  private async startDashboardBackend(): Promise<void> {
-    if (!existsSync(HERMES_PYTHON)) {
-      throw new Error(`Python interpreter not found at ${HERMES_PYTHON}`);
-    }
-    if (!existsSync(HERMES_REPO)) {
-      throw new Error(`hermes-agent repo not found at ${HERMES_REPO}`);
-    }
-
-    this.port = await pickDashboardPort();
-    this.token = randomUUID();
-    const dashboardEnv = {
-      ...this.env,
-      HERMES_DASHBOARD_SESSION_TOKEN: this.token,
-      HERMES_DASHBOARD_TUI: "1",
-    };
-    // NB: no `--tui` flag here. It's a *global* hermes option (valid only
-    // before a subcommand), not a `dashboard` subcommand option, so passing
-    // `dashboard --tui` makes argparse exit 2 ("unrecognized arguments:
-    // --tui") and the warmup fails. The JSON-RPC gateway this client talks to
-    // (`/api/ws`) is always served by a plain `hermes dashboard` and is gated
-    // only by HERMES_DASHBOARD_SESSION_TOKEN (set in `dashboardEnv`).
-    const args = hermesCliArgs([
-      "dashboard",
-      "--no-open",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(this.port),
-    ]);
-    const proc = spawn(HERMES_PYTHON, args, {
-      cwd: HERMES_REPO,
-      env: dashboardEnv,
-      stdio: ["ignore", "pipe", "pipe"],
-      ...HIDDEN_SUBPROCESS_OPTIONS,
-    });
-    this.proc = proc;
-
-    const exitBeforeReady = new Promise<never>((_resolve, reject) => {
-      proc.once("error", reject);
-      proc.once("exit", (code, signal) => {
-        reject(
-          new Error(
-            `Hermes dashboard gateway exited before ready (${signal || code})`,
-          ),
-        );
-      });
-    });
-
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      const line = stripAnsi(chunk.toString()).trim();
-      if (line) console.log(`[dashboard-gateway:${this.key}] ${line}`);
-    });
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      const line = stripAnsi(chunk.toString()).trim();
-      if (line) console.warn(`[dashboard-gateway:${this.key}] ${line}`);
-    });
-
-    const baseUrl = `http://127.0.0.1:${this.port}`;
-    await Promise.race([
-      waitForDashboardReady(baseUrl, this.token, 45_000),
-      exitBeforeReady,
-    ]);
-    await Promise.race([
-      this.connectWebSocket(
-        `ws://127.0.0.1:${this.port}/api/ws?token=${encodeURIComponent(this.token)}`,
-      ),
-      exitBeforeReady,
-    ]);
-
-    proc.removeAllListeners("exit");
-    proc.once("exit", (code, signal) => {
-      const error = new Error(
-        `Hermes dashboard gateway exited (${signal || code})`,
+  // @lat: [[main-process#Local TUI gateway]]
+  private async startServeBackend(): Promise<void> {
+    // Attach to the single shared local `hermes serve` started by
+    // startDashboard — do not spawn a second process on the 9120 range
+    // (that raced, hit EADDRINUSE, and triggered a 60s cooldown).
+    const profile = this.key === "default" ? undefined : this.key;
+    const status = await startDashboard(profile);
+    if (!status.running || !status.connection?.wsUrl) {
+      throw new Error(
+        status.error || "Hermes dashboard gateway is unavailable",
       );
-      this.rejectPending(error);
-      this.reset();
-    });
+    }
+    await this.connectWebSocket(status.connection.wsUrl);
   }
 
   private connectWebSocket(url: string): Promise<void> {
@@ -798,7 +685,6 @@ class TuiGatewayClient {
 
   private reset(): void {
     const ws = this.ws;
-    const proc = this.proc;
     this.ws = null;
     try {
       ws?.removeAllListeners();
@@ -806,18 +692,10 @@ class TuiGatewayClient {
     } catch {
       // best-effort cleanup
     }
-    this.proc = null;
-    try {
-      if (proc && !proc.killed && proc.exitCode === null) proc.kill("SIGTERM");
-    } catch {
-      // best-effort cleanup
-    }
-    this.port = 0;
     this.recentEvents = [];
     this.ready = null;
     this.readyReject = null;
     this.readyResolve = null;
-    this.token = "";
   }
 }
 
@@ -888,7 +766,7 @@ function getTuiGatewayClient(profile?: string): TuiGatewayClient {
   const key = profileKey(profile);
   let client = tuiGatewayClients.get(key);
   if (!client) {
-    client = new TuiGatewayClient(key, tuiGatewayEnv(profile));
+    client = new TuiGatewayClient(key);
     tuiGatewayClients.set(key, client);
   }
   return client;
@@ -905,8 +783,17 @@ function shouldUseTuiGatewayClient(): boolean {
 function warmTuiGatewayClient(profile?: string): void {
   if (isRemoteMode()) return;
   if (!shouldUseTuiGatewayClient()) return;
-  void getTuiGatewayClient(profile)
-    .start()
+  // Warm the shared local serve (same process the renderer chat transport
+  // uses) so the first send does not pay cold-start latency.
+  void startDashboard(profile)
+    .then((status) => {
+      if (!status.running) {
+        console.warn(
+          `[dashboard-gateway:${profileKey(profile)}] warmup failed:`,
+          status.error || "not running",
+        );
+      }
+    })
     .catch((error) => {
       console.warn(
         `[dashboard-gateway:${profileKey(profile)}] warmup failed:`,
@@ -2227,13 +2114,21 @@ async function sendMessageViaTuiGateway(
       throw new Error("Hermes gateway did not return a session id");
     }
 
+    // Prefer submitting as soon as we have a session id. Waiting forever for
+    // session.info used to block TTFT up to 120s on slow serve boots; a short
+    // grace wait still covers the common "info arrives just after create".
     if (!hasSessionInfo) {
-      await waitForGatewayEvent(
-        client,
-        (event) =>
-          event.type === "session.info" && event.session_id === activeSessionId,
-        120_000,
-      );
+      try {
+        await waitForGatewayEvent(
+          client,
+          (event) =>
+            event.type === "session.info" &&
+            event.session_id === activeSessionId,
+          2_500,
+        );
+      } catch {
+        // Proceed — prompt.submit will fail loudly if the session is not ready.
+      }
     }
 
     promptSubmitted = true;

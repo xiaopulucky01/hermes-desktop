@@ -51,9 +51,10 @@ function scoreCapability(
     if (cap.name.toLowerCase().includes(token)) score += 1;
   }
 
-  if (cap.not_for) {
+  if (cap.not_for?.length) {
+    const notFor = cap.not_for.join(" ").toLowerCase();
     for (const token of qTokens) {
-      if (cap.not_for.toLowerCase().includes(token)) score -= 4;
+      if (notFor.includes(token)) score -= 4;
     }
   }
 
