@@ -48,13 +48,13 @@ The menu is styled light-based and stroke-free (`.sidebar-session-menu`): no 1px
 
 Each action calls an existing desktop API with an optimistic local update and rollback on failure: Rename → `updateSessionTitle` (inline `.sidebar-recent-session-rename` input), Move → [[src/main/session-context-folder-store.ts#setSessionContextFolder]] then a `hermes-session-context-folder-changed` event so other surfaces re-group, Delete → a confirmation dialog (portal overlay) then [[src/main/sessions.ts#deleteSessionRows|deleteSession]]. Deleting the open chat calls `onSessionDeleted`, which [[src/renderer/src/screens/Layout/Layout.tsx#Layout]] uses to drop to a fresh New Chat.
 
-Pinned rows are a desktop-only affordance: their ids live in `localStorage` (`hermes.sidebar.pinnedSessions`), and pinned sessions are pulled out of the normal grouping into a collapsible **Pinned** section at the top of the list.
+Pinned rows are a desktop-only affordance: their ids live in `localStorage` (`hermes.sidebar.pinnedSessions`), and pinned sessions are pulled out of the normal grouping into a collapsible **Pinned** section at the top of the list, ordered by `startedAt` descending via [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#sortPinnedByRecency]] (see [[sidebar-navigation#Pinned sessions on open]]).
 
 ## Pinned sessions on open
 
 Pinned chats must appear as soon as the app opens, even when they are older than the first recent page.
 
-[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#mergePinnedIntoSessionPage]] merges any pinned rows present in a sync/cache pool into the first page, and [[src/main/session-cache.ts#getCachedSessionsByIds]] (IPC `get-cached-sessions-by-ids`) hydrates pins still missing after the first page load. The pinned list shows at most [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#PINNED_VISIBLE_ROWS|10]] rows at once; further pins scroll inside `.sidebar-recent-pinned-scroll`. Section headers show counts: pinned uses the hydrated pin list length, and Chats uses [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#countSidebarChats]] over a growing session catalog so pagination does not under-count.
+[[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#mergePinnedIntoSessionPage]] merges any pinned rows present in a sync/cache pool into the first page, and [[src/main/session-cache.ts#getCachedSessionsByIds]] (IPC `get-cached-sessions-by-ids`) hydrates pins still missing after the first page load. The pinned section is then ordered by [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#sortPinnedByRecency]] (`startedAt` descending) so hydrate/refresh prepend order cannot scramble the list. The pinned list shows at most [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#PINNED_VISIBLE_ROWS|10]] rows at once; further pins scroll inside `.sidebar-recent-pinned-scroll`. Section headers show counts: pinned uses the hydrated pin list length, and Chats uses [[src/renderer/src/screens/Layout/SidebarRecentSessions.tsx#countSidebarChats]] over a growing session catalog so pagination does not under-count.
 
 ## Full-list modal
 

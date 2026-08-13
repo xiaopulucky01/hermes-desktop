@@ -27,6 +27,8 @@ import SidebarSessionMenu, {
 interface RecentSession {
   id: string;
   title: string;
+  /** Unix seconds — same field the cache sorts on (`startedAt` desc). */
+  startedAt: number;
   contextFolder?: string | null;
 }
 
@@ -102,12 +104,20 @@ function sameSessions(a: RecentSession[], b: RecentSession[]): boolean {
     if (
       a[i].id !== b[i].id ||
       a[i].title !== b[i].title ||
+      a[i].startedAt !== b[i].startedAt ||
       (a[i].contextFolder ?? null) !== (b[i].contextFolder ?? null)
     ) {
       return false;
     }
   }
   return true;
+}
+
+/** Pinned section order: newest `startedAt` first (stable across refresh/hydrate). */
+export function sortPinnedByRecency(
+  rows: ReadonlyArray<RecentSession>,
+): RecentSession[] {
+  return [...rows].sort((a, b) => b.startedAt - a.startedAt);
 }
 
 /**
@@ -121,6 +131,7 @@ export function mergePinnedIntoSessionPage(
   pool: ReadonlyArray<{
     id: string;
     title: string;
+    startedAt?: number;
     contextFolder?: string | null;
   }>,
 ): RecentSession[] {
@@ -133,6 +144,7 @@ export function mergePinnedIntoSessionPage(
     extras.push({
       id: s.id,
       title: s.title,
+      startedAt: s.startedAt ?? 0,
       contextFolder: s.contextFolder ?? null,
     });
   }
@@ -296,6 +308,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       pool: ReadonlyArray<{
         id: string;
         title: string;
+        startedAt?: number;
         contextFolder?: string | null;
       }>,
     ): void => {
@@ -306,6 +319,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
           byId.set(s.id, {
             id: s.id,
             title: s.title,
+            startedAt: s.startedAt ?? byId.get(s.id)?.startedAt ?? 0,
             contextFolder: s.contextFolder ?? null,
           });
         }
@@ -321,13 +335,15 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       list: Array<{
         id: string;
         title: string;
+        startedAt?: number;
         contextFolder?: string | null;
       }>,
       limit = RECENT_SESSIONS_PAGE_SIZE,
     ): RecentSession[] =>
-      list.slice(0, limit).map(({ id, title, contextFolder }) => ({
+      list.slice(0, limit).map(({ id, title, startedAt, contextFolder }) => ({
         id,
         title,
+        startedAt: startedAt ?? 0,
         contextFolder: contextFolder ?? null,
       })),
     [],
@@ -338,6 +354,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       list: Array<{
         id: string;
         title: string;
+        startedAt?: number;
         contextFolder?: string | null;
       }>,
     ): void => {
@@ -359,6 +376,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       list: Array<{
         id: string;
         title: string;
+        startedAt?: number;
         contextFolder?: string | null;
       }>,
     ): void => {
@@ -408,6 +426,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       list: Array<{
         id: string;
         title: string;
+        startedAt?: number;
         contextFolder?: string | null;
       }>,
     ): void => {
@@ -571,9 +590,11 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const expanded = open;
 
   // Pinned rows are pulled out of the normal grouping and shown in their own
-  // section at the top (ChatGPT-style), preserving recency order.
+  // section at the top (ChatGPT-style), sorted by startedAt descending so
+  // refresh/hydrate prepend order cannot scramble the list.
   const pinnedSessions = useMemo(
-    () => sessions.filter((s) => pinnedIds.has(s.id)),
+    () =>
+      sortPinnedByRecency(sessions.filter((s) => pinnedIds.has(s.id))),
     [sessions, pinnedIds],
   );
   const { projectGroups, chats } = useMemo(
