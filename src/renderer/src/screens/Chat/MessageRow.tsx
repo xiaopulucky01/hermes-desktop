@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useCallback } from "react";
-import { formatDistanceToNowStrict } from "date-fns";
+import { format } from "date-fns";
 import { Copy, Check } from "lucide-react";
 import ProfileAvatar from "../../components/common/ProfileAvatar";
 import { OrbLoader } from "../../components/OrbLoader";
@@ -45,7 +45,7 @@ function coerceToEpochMs(raw: unknown): number {
 }
 
 // Earliest valid chat timestamp: Jan 1 2020 (1577836800000 ms).
-// Anything before 2020 (e.g. 0, 1 => Jan 1970 => "57 years ago") is bogus/dummy.
+// Anything before 2020 (e.g. 0, 1 => Jan 1970) is bogus/dummy.
 const MIN_VALID_EPOCH_MS = 1_577_836_800_000;
 
 function isValidEpochMs(ms: number): boolean {
@@ -56,27 +56,12 @@ function isValidEpochMs(ms: number): boolean {
   );
 }
 
-/**
- * Relative "time ago" label for the hover-time element.
- */
+/** Absolute bubble corner label: `yyyy-MM-dd HH:mm:ss`. */
 function formatBubbleTime(ms: number): string | null {
   try {
-    if (Date.now() - ms < 10_000 && Date.now() >= ms) return "just now";
-    return formatDistanceToNowStrict(ms, { addSuffix: true });
+    return format(new Date(ms), "yyyy-MM-dd HH:mm:ss");
   } catch {
     return null;
-  }
-}
-
-/** Absolute timestamp for the tooltip and `<time dateTime>` value. */
-function formatBubbleTimeAbsolute(ms: number): string {
-  try {
-    return new Date(ms).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  } catch {
-    return "";
   }
 }
 
@@ -251,80 +236,85 @@ export const MessageRow = memo(function MessageRow({
       ) : (
         <HermesAvatar active={isLoading && isLast} agent={agent} />
       )}
-      <div
-        className={`chat-bubble chat-bubble-${msg.role}${
-          msg.error ? " chat-bubble-error" : ""
-        }`}
-      >
-        {msg.content && !isLoading && !msg.isSlashLoader && (
-          <div className="chat-bubble-actions">
-            <button
-              type="button"
-              className="chat-bubble-copy"
-              onClick={handleCopy}
-              title={copied ? t("common.copied") : t("chat.copyMessage")}
-              aria-label={copied ? t("common.copied") : t("chat.copyMessage")}
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-            </button>
-          </div>
-        )}
-        {hasAttachments && (
-          <div className="chat-message-attachments">
-            {msg.attachments!.map((att) => (
-              <AttachmentChip key={att.id} attachment={att} />
-            ))}
-          </div>
-        )}
-        {msg.isSlashLoader ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <OrbLoader state="working" size={20} aria-label="running-command" />
-            <span>{msg.content}</span>
-          </div>
-        ) : (
-          msg.content &&
-          (msg.role === "agent" && segments
-            ? segments.map((segment) =>
-                segment.type === "text" ? (
-                  segment.value.trim() ? (
-                    // Keyed on the segment's character offset rather than its
-                    // array index — a MEDIA: token appearing mid-stream shifts
-                    // every subsequent index, which would otherwise re-mount
-                    // each downstream MediaSegmentView and re-fire its
-                    // `mediaFileExists` probe.
-                    <AgentMarkdown
-                      key={`t-${segment.start}`}
-                      streaming={isLoading && isLast}
-                    >
-                      {segment.value}
-                    </AgentMarkdown>
-                  ) : null
-                ) : (
-                  <MediaSegmentView
-                    key={`m-${segment.start}`}
-                    token={segment.token}
-                    raw={segment.raw}
-                    source={segment.source}
-                  />
-                ),
-              )
-            : msg.content)
-        )}
-        {msg.error && (
-          <div className="chat-error-message" role="alert">
-            {msg.error}
-          </div>
+      <div className="chat-bubble-stack">
+        <div
+          className={`chat-bubble chat-bubble-${msg.role}${
+            msg.error ? " chat-bubble-error" : ""
+          }`}
+        >
+          {msg.content && !isLoading && !msg.isSlashLoader && (
+            <div className="chat-bubble-actions">
+              <button
+                type="button"
+                className="chat-bubble-copy"
+                onClick={handleCopy}
+                title={copied ? t("common.copied") : t("chat.copyMessage")}
+                aria-label={copied ? t("common.copied") : t("chat.copyMessage")}
+              >
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+          )}
+          {hasAttachments && (
+            <div className="chat-message-attachments">
+              {msg.attachments!.map((att) => (
+                <AttachmentChip key={att.id} attachment={att} />
+              ))}
+            </div>
+          )}
+          {msg.isSlashLoader ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <OrbLoader
+                state="working"
+                size={20}
+                aria-label="running-command"
+              />
+              <span>{msg.content}</span>
+            </div>
+          ) : (
+            msg.content &&
+            (msg.role === "agent" && segments
+              ? segments.map((segment) =>
+                  segment.type === "text" ? (
+                    segment.value.trim() ? (
+                      // Keyed on the segment's character offset rather than its
+                      // array index — a MEDIA: token appearing mid-stream shifts
+                      // every subsequent index, which would otherwise re-mount
+                      // each downstream MediaSegmentView and re-fire its
+                      // `mediaFileExists` probe.
+                      <AgentMarkdown
+                        key={`t-${segment.start}`}
+                        streaming={isLoading && isLast}
+                      >
+                        {segment.value}
+                      </AgentMarkdown>
+                    ) : null
+                  ) : (
+                    <MediaSegmentView
+                      key={`m-${segment.start}`}
+                      token={segment.token}
+                      raw={segment.raw}
+                      source={segment.source}
+                    />
+                  ),
+                )
+              : msg.content)
+          )}
+          {msg.error && (
+            <div className="chat-error-message" role="alert">
+              {msg.error}
+            </div>
+          )}
+        </div>
+        {bubbleTime && isTimeValid && (
+          <time
+            className="chat-bubble-time"
+            dateTime={new Date(epochMs).toISOString()}
+          >
+            {bubbleTime}
+          </time>
         )}
       </div>
-      {bubbleTime && isTimeValid && (
-        <time
-          className="chat-bubble-time"
-          dateTime={new Date(epochMs).toISOString()}
-          title={formatBubbleTimeAbsolute(epochMs)}
-        >
-          {bubbleTime}
-        </time>
-      )}
       {showApprovalBar && (
         <div className="chat-approval-bar">
           <button

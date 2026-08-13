@@ -4930,10 +4930,8 @@ body:has(.shell-vibrant),
   max-width: 85%;
   animation: messageIn 0.2s ease;
   position: relative;
-  /* Replaces the old container flex `gap` (now block flow). Also gives the
-     hover timestamp (.chat-bubble-time, ~15px below the bubble) room *inside*
-     this box so the paint containment that `content-visibility` implies does
-     not clip it. */
+  /* Replaces the old container flex `gap` (now block flow). Also leaves room
+     below the bubble for the absolutely positioned `.chat-bubble-time`. */
   padding-bottom: 16px;
   /* Skip layout + paint for rows scrolled out of view. This turns the
      per-keystroke document reflow from O(all messages) into O(visible rows),
@@ -5063,35 +5061,27 @@ body:has(.shell-vibrant),
   opacity: 1;
 }
 
-/* Hover timestamp — sits just below the bubble, revealed on row hover.
-   Anchored inside .chat-message's bottom padding (not overflowing it): the
-   `content-visibility` on .chat-message implies paint containment, which would
-   clip anything spilling past the box, so this sits at bottom:1px within the
-   16px padding instead of overflowing at -15px. */
+/* Shrink-wraps to the bubble content only. The timestamp is absolutely
+   positioned so a short bubble is not stretched to the time label's width. */
+.chat-bubble-stack {
+  position: relative;
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Outside the bubble, right-aligned to its edge; out of normal flow so it
+   never widens a short bubble. Room comes from `.chat-message` padding-bottom. */
 .chat-bubble-time {
   position: absolute;
-  bottom: 1px;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
   font-size: 11px;
   line-height: 1;
   color: var(--text-secondary);
   white-space: nowrap;
   pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-/* Agent rows start after the avatar (28px + 12px gap); user rows are
-   right-aligned. Anchor the time to the bubble's outer edge accordingly. */
-.chat-message-agent .chat-bubble-time {
-  left: 40px;
-}
-
-.chat-message-user .chat-bubble-time {
-  right: 0;
-}
-
-.chat-message:hover .chat-bubble-time {
-  opacity: 1;
 }
 
 .chat-bubble-copy {

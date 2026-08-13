@@ -1012,12 +1012,14 @@ export function useDashboardChatTransport({
             : {};
         const label = p.task_id ? `[bg ${p.task_id}] ` : "[bg] ";
         const body = String(p.text ?? "").trim() || "(no output)";
+        const stamp = Date.now();
         const appended: ChatMessage[] = [
           ...messagesRef.current,
           {
-            id: `bg-${p.task_id || Date.now()}`,
+            id: `bg-${p.task_id || stamp}`,
             role: "agent",
             content: `${label}${body}`,
+            timestamp: stamp,
           },
         ];
         messagesRef.current = appended;

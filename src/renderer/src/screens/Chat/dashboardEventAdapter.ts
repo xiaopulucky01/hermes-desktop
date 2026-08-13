@@ -163,6 +163,7 @@ function appendClarifyRequest(
     content,
     pending: false,
     localOnly: true,
+    timestamp: now,
   };
   if (existingIndex >= 0) {
     return [
@@ -241,6 +242,7 @@ function appendAssistantDelta(
       role: "agent",
       content: chunk,
       pending: true,
+      timestamp: now,
       ...(activeTurn?.turnId ? { turnId: activeTurn.turnId } : {}),
     },
   ];
@@ -829,6 +831,7 @@ function completeAssistantWithFinalText(
       role: "agent",
       content: finalText,
       pending: false,
+      timestamp: now,
       ...(activeTurn?.turnId ? { turnId: activeTurn.turnId } : {}),
     },
   ];

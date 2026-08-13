@@ -287,8 +287,8 @@ function mergeDbMetadataIntoStreamed(
   if ("kind" in streamed) return streamed;
   const s = streamed as ChatBubbleMessage;
   const d = db as ChatBubbleMessage;
-  // The canonical DB row carries the recorded timestamp the live stream
-  // never had — adopt it so the hover time matches history after refresh.
+  // Prefer an already-stamped live bubble time; otherwise adopt the DB
+  // recorded timestamp so history hydration still fills gaps.
   const timestamp =
     s.timestamp ?? (typeof d.timestamp === "number" ? d.timestamp : undefined);
   // Attachments from the DB that the stream didn't deliver.

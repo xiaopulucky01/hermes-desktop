@@ -578,9 +578,15 @@ function Chat({
 
   const addAgentMessage = useCallback(
     (content: string) => {
+      const stamp = Date.now();
       setMessages((prev) => [
         ...prev,
-        { id: `agent-local-${Date.now()}`, role: "agent", content },
+        {
+          id: `agent-local-${stamp}`,
+          role: "agent",
+          content,
+          timestamp: stamp,
+        },
       ]);
     },
     [setMessages],

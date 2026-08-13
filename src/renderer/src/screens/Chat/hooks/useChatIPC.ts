@@ -148,13 +148,15 @@ export function useChatIPC({
           ];
         }
         if (!chunk || !chunk.trim()) return prev;
+        const stamp = Date.now();
         return [
           ...prev,
           {
-            id: `agent-${Date.now()}`,
+            id: `agent-${stamp}`,
             role: "agent",
             content: chunk,
             pending: true,
+            timestamp: stamp,
             ...(activeTurnRef.current?.turnId
               ? { turnId: activeTurnRef.current.turnId }
               : {}),

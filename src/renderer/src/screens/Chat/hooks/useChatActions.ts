@@ -148,6 +148,7 @@ export function useChatActions({
           role: "user",
           content,
           turnId: turn.turnId,
+          timestamp: Date.now(),
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
       ]);
@@ -283,7 +284,12 @@ export function useChatActions({
           setMessages((prev) =>
             prev.map((m) =>
               m.id === pendingId
-                ? { id: pendingId, role: "agent", content }
+                ? {
+                    id: pendingId,
+                    role: "agent",
+                    content,
+                    timestamp: Date.now(),
+                  }
                 : m,
             ),
           );

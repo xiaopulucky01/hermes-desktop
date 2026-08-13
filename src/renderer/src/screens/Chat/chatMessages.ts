@@ -123,13 +123,15 @@ export function markActiveTurnFailed(
     });
   }
 
+  const stamp = Date.now();
   const row: ChatBubbleMessage = {
-    id: `error-${Date.now()}`,
+    id: `error-${stamp}`,
     role: "agent",
     content: "",
     error: errorText,
     pending: false,
     localOnly: true,
+    timestamp: stamp,
     ...(activeTurn?.turnId ? { turnId: activeTurn.turnId } : {}),
   };
 

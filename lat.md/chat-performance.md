@@ -12,11 +12,11 @@ The rule lives on `.chat-message` in the renderer stylesheet (`src/renderer/src/
 
 The `auto` keyword in `contain-intrinsic-size` makes the browser remember each row's real measured height after it renders once, so the scrollbar and scroll position stay accurate; the `120px` is only the first-paint estimate for never-yet-rendered rows.
 
-### Paint containment and the hover timestamp
+### Paint containment and the bubble timestamp
 
-`content-visibility` implies paint containment, which clips anything drawn outside the row's box — including the hover timestamp that sits below the bubble.
+`content-visibility` implies paint containment, which clips anything drawn outside the row's box.
 
-The timestamp (`.chat-bubble-time`) used to overflow ~15px below the bubble and would be clipped. It now sits at `bottom: 1px` inside the row's `padding-bottom: 16px`, so it stays visible while still appearing just under the bubble.
+The timestamp (`.chat-bubble-time`) sits just below the bubble, absolutely positioned to the right edge of a shrink-wrapped `.chat-bubble-stack`, so it never widens short bubbles and stays inside the row via `.chat-message` `padding-bottom`.
 
 ### Fullscreen overlays inside rows must portal to body
 
@@ -32,7 +32,7 @@ The scroll container `.chat-messages` is block flow, not a flex column. A flex c
 
 A correct `scrollHeight` matters because [[src/renderer/src/screens/Chat/hooks/useChatScroll.ts#useChatScroll]] uses `scrollHeight - scrollTop - clientHeight` to decide whether the view is pinned to the bottom; a wrong value would break auto-scroll.
 
-The flex `gap` that previously spaced rows is replaced by per-row spacing: `.chat-message` carries `padding-bottom: 16px` (which also provides the timestamp's room), and non-message children that lack it (`.chat-clarify`) carry an equivalent `margin-bottom`. Block flow also moves alignment from `align-self` to `margin-left: auto` for user rows, and the empty state fills height with `min-height: 100%` instead of `flex: 1`.
+The flex `gap` that previously spaced rows is replaced by per-row spacing: `.chat-message` carries `padding-bottom: 16px`, and non-message children that lack it (`.chat-clarify`) carry an equivalent `margin-bottom`. Block flow also moves alignment from `align-self` to `margin-left: auto` for user rows, and the empty state fills height with `min-height: 100%` instead of `flex: 1`.
 
 ## Textarea auto-resize avoids per-keystroke reflow
 

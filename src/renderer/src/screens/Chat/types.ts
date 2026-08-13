@@ -23,7 +23,7 @@ export interface ChatBubbleMessage {
   localOnly?: boolean;
   /** Renderer-local turn identity used to anchor local failures. */
   turnId?: string;
-  /** Epoch-ms the message was recorded; surfaced as a hover timestamp. */
+  /** Epoch-ms the message was recorded; shown as a bubble corner timestamp. */
   timestamp?: number;
   /** Renderer-only progress row while a slash command is executing. */
   isSlashLoader?: boolean;
