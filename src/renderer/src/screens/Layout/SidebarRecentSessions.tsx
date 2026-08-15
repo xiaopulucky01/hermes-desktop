@@ -52,21 +52,78 @@ const FOLDERS_CLOSED_KEY = "hermes.sidebar.closedProjectFolders";
 const PINNED_OPEN_KEY = "hermes.sidebar.pinnedOpen";
 // Pinned session ids live in localStorage like the disclosure state — pinning
 // is a desktop-only UI affordance, not part of the agent session schema.
-const PINNED_IDS_KEY = "hermes.sidebar.pinnedSessions";
+// Stored per profile because session caches (and state.db) are per-profile;
+// a flat id list made pins vanish when switching agents.
+export const PINNED_IDS_KEY = "hermes.sidebar.pinnedSessions";
 
-function readStoredPinned(): Set<string> {
+function profileKey(profile: string): string {
+  return profile.trim() || "default";
+}
+
+/** Read the full pin map from localStorage (profile → session ids). */
+export function readPinnedSessionsMap(): Record<string, string[]> {
   try {
     const raw = localStorage.getItem(PINNED_IDS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return new Set(Array.isArray(parsed) ? parsed.filter(String) : []);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      // Legacy flat list — callers migrate into a concrete profile.
+      return { __legacy: parsed.filter((id): id is string => !!id) };
+    }
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(
+      parsed as Record<string, unknown>,
+    )) {
+      if (Array.isArray(value)) {
+        out[key] = value.filter((id): id is string => typeof id === "string" && !!id);
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Pins for one profile. Migrates a legacy flat `string[]` into `profile` on
+ * first read so existing pins survive the per-profile storage upgrade.
+ */
+// @lat: [[sidebar-navigation#Pinned sessions on open]]
+export function readPinnedIdsForProfile(profile: string): Set<string> {
+  const key = profileKey(profile);
+  try {
+    const raw = localStorage.getItem(PINNED_IDS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      const ids = parsed.filter((id): id is string => typeof id === "string" && !!id);
+      localStorage.setItem(PINNED_IDS_KEY, JSON.stringify({ [key]: ids }));
+      return new Set(ids);
+    }
+    if (!parsed || typeof parsed !== "object") return new Set();
+    const list = (parsed as Record<string, unknown>)[key];
+    return new Set(
+      Array.isArray(list)
+        ? list.filter((id): id is string => typeof id === "string" && !!id)
+        : [],
+    );
   } catch {
     return new Set();
   }
 }
 
-function storePinned(ids: Set<string>): void {
+/** Persist pins for one profile without clobbering other profiles' lists. */
+export function storePinnedIdsForProfile(
+  profile: string,
+  ids: ReadonlySet<string>,
+): void {
+  const key = profileKey(profile);
   try {
-    localStorage.setItem(PINNED_IDS_KEY, JSON.stringify(Array.from(ids)));
+    const map = readPinnedSessionsMap();
+    delete map.__legacy;
+    map[key] = Array.from(ids);
+    localStorage.setItem(PINNED_IDS_KEY, JSON.stringify(map));
   } catch {
     /* ignore persistence failures */
   }
@@ -262,7 +319,7 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     () => readStoredClosedFolders(),
   );
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() =>
-    readStoredPinned(),
+    readPinnedIdsForProfile(activeProfile),
   );
   const [pinnedOpen, setPinnedOpen] = useState(() =>
     readStoredOpen(PINNED_OPEN_KEY),
@@ -282,6 +339,9 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
   const hasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
   const pinnedIdsRef = useRef(pinnedIds);
+  // Which profile the in-memory pin set belongs to — must stay aligned when
+  // switching agents so we never write profile A's pins under profile B.
+  const pinnedProfileRef = useRef(profileKey(activeProfile));
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -299,9 +359,21 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     pinnedIdsRef.current = pinnedIds;
   }, [pinnedIds]);
 
+  // Persist pins per profile. On agent switch, flush the outgoing profile's
+  // set first, then load the incoming profile's set — never write the previous
+  // agent's pins under the new key (that would wipe the real list).
   useEffect(() => {
-    storePinned(pinnedIds);
-  }, [pinnedIds]);
+    const nextKey = profileKey(activeProfile);
+    if (pinnedProfileRef.current !== nextKey) {
+      storePinnedIdsForProfile(pinnedProfileRef.current, pinnedIdsRef.current);
+      pinnedProfileRef.current = nextKey;
+      const nextPins = readPinnedIdsForProfile(nextKey);
+      pinnedIdsRef.current = nextPins;
+      setPinnedIds(nextPins);
+      return;
+    }
+    storePinnedIdsForProfile(nextKey, pinnedIds);
+  }, [activeProfile, pinnedIds]);
 
   const rememberCatalog = useCallback(
     (
@@ -454,11 +526,14 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
       try {
         const synced = await window.hermesAPI.syncSessionCache();
         applyLoadedWindow(synced);
+        // Remote/SSH sync returns a short recent window; re-hydrate pins that
+        // fall outside it so the Pinned section does not flicker empty.
+        await hydratePinnedSessions();
       } catch {
         // keep whatever we had — the list is best-effort UI sugar
       }
     },
-    [applyLoadedWindow],
+    [applyLoadedWindow, hydratePinnedSessions],
   );
 
   const loadNextPage = useCallback(async (): Promise<void> => {
@@ -573,16 +648,18 @@ const SidebarRecentSessions = memo(function SidebarRecentSessions({
     if (open) void refresh();
   }, [open, currentSessionId, refresh]);
 
-  // Switching agent points the list at a different profile's DB. Force a
-  // reload immediately (bypassing the throttle) so the list isn't stale.
+  // Switching agent points the list at a different profile's DB. Clear the
+  // visible rows immediately so the previous profile's chats (and pins) do not
+  // linger; the load effect keyed on `activeProfile` re-fetches + hydrates.
+  // Do NOT call refresh() here — it raced the load effect and could replace a
+  // hydrated pin list with a short sync window that omitted older pins.
   const prevProfileRef = useRef(activeProfile);
   useEffect(() => {
     if (prevProfileRef.current === activeProfile) return;
     prevProfileRef.current = activeProfile;
     setCatalog([]);
     setSessions([]);
-    void refresh(true);
-  }, [activeProfile, refresh]);
+  }, [activeProfile]);
 
   // Keep the wrapper mounted so the collapse/expand animates with CSS grid
   // tracks. Effects above are still gated on `open`, so a collapsed sidebar
