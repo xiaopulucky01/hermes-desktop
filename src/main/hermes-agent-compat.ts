@@ -10,7 +10,10 @@ import {
 import { join } from "path";
 import { Buffer } from "buffer";
 import type { SshConfig } from "./ssh-tunnel";
-import { HERMES_HOME, HERMES_REPO } from "./installer";
+import {
+  HERMES_HOME,
+  hermesPythonSourceRoot,
+} from "./installer";
 import { sshExec } from "./ssh-remote";
 
 export const HERMES_AGENT_COMPAT_VERSION =
@@ -397,7 +400,10 @@ export function writeCompatFileAtomically(path: string, source: string): void {
 }
 
 export function ensureLocalDashboardCompatibility(): HermesAgentCompatResult {
-  const path = join(HERMES_REPO, "hermes_cli", "web_server.py");
+  // Bundled engine: hermes_cli lives under site-packages, not resources/python/.
+  // Traditional install: hermesPythonSourceRoot() is the hermes-agent checkout.
+  // @lat: [[bundled-runtime#Source paths under the bundle]]
+  const path = join(hermesPythonSourceRoot(), "hermes_cli", "web_server.py");
   try {
     const source = readFileSync(path, "utf-8");
     const patched = patchDashboardCompatibilitySource(source);

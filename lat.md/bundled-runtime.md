@@ -16,6 +16,14 @@ On Windows the bundle launches console `python.exe` with a normalized path so ga
 
 [[src/main/bundled-runtime.ts#resolveBundledSpawnExecutable]] picks `python.exe` (not `pythonw.exe`) via `realpath`. Console flashes are suppressed by `sitecustomize.py` (`CREATE_NO_WINDOW`). [[src/main/installer.ts#buildHermesChildEnv]] sets `PYTHONPATH` to the bundled site-packages. [[src/main/installer.ts#getHermesPythonSpawnPath]] re-resolves the interpreter at spawn time so a dev session started before `prepare-runtime` can recover once the bundle exists.
 
+## Source paths under the bundle
+
+Bundled installs put agent sources under site-packages, not a checkout root beside `python.exe`.
+
+[[src/main/hermes-agent-compat.ts#ensureLocalDashboardCompatibility]] reads `web_server.py` via [[src/main/installer.ts#hermesPythonSourceRoot]] (the site-packages tree). Using `HERMES_REPO`/`resources/python/hermes_cli/` fails with ENOENT because that directory does not exist in the bundle layout.
+
+When installing from a local `resources/hermes-agent` checkout, every new top-level `.py` module must be listed in that checkout's `[tool.setuptools] py-modules` or the sealed site-packages install omits it and the gateway dies on import (e.g. `registration_lifecycle` required by `hermes_cli.plugins`).
+
 ## Desktop-core (optional)
 
 The `desktop-core/` package (when present) installs `core` plus OCR extras; absent trees skip that install step.
