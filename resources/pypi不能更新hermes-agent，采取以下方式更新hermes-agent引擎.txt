@@ -30,6 +30,11 @@ $env:HERMES_NIX_BUILD = "1"
 cd D:\Project\private\hermes-desktop
 node scripts/patch-bundled-python.mjs
 # skills：可 npm run 对应 prepare-bundled-skills，或按你们现有脚本
+
+cd D:\Project\private\hermes-desktop
+Remove-Item "resources\python\skills\.bundled-skills-version" -Force
+$env:HERMES_AGENT_SKILLS_SOURCE = "D:\Project\private\hermes-desktop\resources\hermes-agent\skills"
+node scripts/prepare-bundled-skills.mjs
 #否则可能缺桌面补丁、官方 skills 仍停在旧版。
 
 
