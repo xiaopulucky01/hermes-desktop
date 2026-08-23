@@ -116,14 +116,19 @@ export default function AppearancePane(): React.JSX.Element {
               {t("settings.roundedCorners.hint")}
             </div>
           </div>
-          <label className="tools-toggle" onClick={(e) => e.stopPropagation()}>
-            <input
-              type="checkbox"
-              checked={rounded}
-              onChange={() => setRounded(!rounded)}
-            />
-            <span className="tools-toggle-track" />
-          </label>
+          <div className="settings-row-control">
+            <label
+              className="tools-toggle"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={rounded}
+                onChange={() => setRounded(!rounded)}
+              />
+              <span className="tools-toggle-track" />
+            </label>
+          </div>
         </div>
 
         <div className="settings-row">
@@ -131,18 +136,20 @@ export default function AppearancePane(): React.JSX.Element {
             <div className="settings-row-label">{t("settings.font.label")}</div>
             <div className="settings-row-hint">{t("settings.font.hint")}</div>
           </div>
-          <div className="settings-seg">
-            {FONT_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`settings-seg-btn ${font === opt.value ? "active" : ""}`}
-                style={{ fontFamily: opt.stack }}
-                onClick={() => setFont(opt.value)}
-              >
-                {t(opt.label)}
-              </button>
-            ))}
+          <div className="settings-row-control">
+            <div className="settings-seg">
+              {FONT_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`settings-seg-btn ${font === opt.value ? "active" : ""}`}
+                  style={{ fontFamily: opt.stack }}
+                  onClick={() => setFont(opt.value)}
+                >
+                  {t(opt.label)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -158,17 +165,19 @@ export default function AppearancePane(): React.JSX.Element {
                   : t("settings.hardwareAcceleration.hint")}
               </div>
             </div>
-            <div className="settings-seg">
-              {GPU_MODES.map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={`settings-seg-btn ${savedPref === mode ? "active" : ""}`}
-                  onClick={() => selectGpuMode(mode)}
-                >
-                  {t(`settings.hardwareAcceleration.${mode}`)}
-                </button>
-              ))}
+            <div className="settings-row-control">
+              <div className="settings-seg">
+                {GPU_MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`settings-seg-btn ${savedPref === mode ? "active" : ""}`}
+                    onClick={() => selectGpuMode(mode)}
+                  >
+                    {t(`settings.hardwareAcceleration.${mode}`)}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}

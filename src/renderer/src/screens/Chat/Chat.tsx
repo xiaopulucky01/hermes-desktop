@@ -10,10 +10,6 @@ import { ContextFolderChip } from "./ContextFolderChip";
 import { WorktreePanel } from "./WorktreePanel";
 import { RemoteFolderPicker } from "./RemoteFolderPicker";
 import { WebPreviewPanel } from "./WebPreviewPanel";
-import {
-  AvailableExpertsBar,
-  type A2aExpert,
-} from "./AvailableExpertsBar";
 import { useChatScroll } from "./hooks/useChatScroll";
 import { useChatIPC } from "./hooks/useChatIPC";
 import { useChatActions, parseBackgroundCommand } from "./hooks/useChatActions";
@@ -29,6 +25,7 @@ import {
   useDashboardChatTransport,
 } from "./hooks/useDashboardChatTransport";
 import { useI18n } from "../../components/useI18n";
+import { useChatPreferences } from "../../components/ChatPreferencesProvider";
 import { buildChatTranscript } from "./transcriptUtils";
 import { ConfigHealthBanner } from "../../components/ConfigHealthBanner";
 import FollowUsModal from "../../components/FollowUsModal";
@@ -48,10 +45,7 @@ import type {
   AgentCommandsCatalogResponse,
   AgentSlashCommand,
 } from "./slash/types";
-import {
-  dbItemsToChatMessages,
-  type DbHistoryItem,
-} from "./sessionHistory";
+import { shouldPlayCompletionSound } from "./chatNotifications";
 
 interface QueuedMessage {
   text: string;
@@ -134,6 +128,7 @@ function Chat({
   agentAppearance,
 }: ChatProps): React.JSX.Element {
   const { t } = useI18n();
+  const { completionSoundEnabled } = useChatPreferences();
   // Identity + appearance of the agent this conversation is with. Passed to the
   // transcript so idle avatars render the agent's profile picture (the loading
   // gif is only shown while a turn is generating).
@@ -158,10 +153,14 @@ function Chat({
   useEffect(() => {
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = isLoading;
-    if (!wasLoading || isLoading) return;
+    if (
+      !shouldPlayCompletionSound(wasLoading, isLoading, completionSoundEnabled)
+    ) {
+      return;
+    }
     // Agent just finished — play a short notification chime (shared context).
     playFinishChime();
-  }, [isLoading]);
+  }, [completionSoundEnabled, isLoading]);
   const [hermesSessionId, setHermesSessionId] = useState<string | null>(
     initialSessionId ?? null,
   );
@@ -182,13 +181,6 @@ function Chat({
     }
   }, [runId, messages, onTitleChange]);
   const [toolProgress, setToolProgress] = useState<string | null>(null);
-  const [a2aLiveProgress, setA2aLiveProgress] = useState<{
-    peer: string;
-    line: string;
-    endpoint: string;
-    task_id: string;
-    ts: number;
-  } | null>(null);
   const [usage, setUsage] = useState<UsageState | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [remoteMode, setRemoteMode] = useState(false);
@@ -229,32 +221,6 @@ function Chat({
     };
   }, [initialSessionId]);
 
-  // Soft remounts restore tabs by sessionId without a seed transcript — pull
-  // history from state.db so the open chat isn't an empty shell.
-  useEffect(() => {
-    if (!initialSessionId) return;
-    if ((initialMessages?.length ?? 0) > 0) return;
-    if (messages.length > 0) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const items = (await window.hermesAPI.getSessionMessages(
-          initialSessionId,
-        )) as DbHistoryItem[];
-        if (cancelled || !items?.length) return;
-        const hydrated = dbItemsToChatMessages(items);
-        if (!cancelled && hydrated.length > 0) setMessages(hydrated);
-      } catch {
-        /* best-effort hydrate after sleep remount */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // Only hydrate once on mount for this session seed — not on every message.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSessionId]);
-
   // Persist the linked folder for this session whenever it changes, once a
   // gateway session id exists. Gated on the load above so a resumed session's
   // stored folder is never clobbered by the initial null.
@@ -292,9 +258,6 @@ function Chat({
   const chatInputRef = useRef<ChatInputHandle>(null);
   const queueRef = useRef<QueuedMessage[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
-  const [preferredExpert, setPreferredExpert] = useState<A2aExpert | null>(
-    null,
-  );
   const activeTurnRef = useRef<ActiveTurn | null>(null);
   const dashboardChatEnabled = dashboardChatEnabledForConnection(
     import.meta.env.VITE_HERMES_DESKTOP_DASHBOARD_CHAT,
@@ -578,15 +541,9 @@ function Chat({
 
   const addAgentMessage = useCallback(
     (content: string) => {
-      const stamp = Date.now();
       setMessages((prev) => [
         ...prev,
-        {
-          id: `agent-local-${stamp}`,
-          role: "agent",
-          content,
-          timestamp: stamp,
-        },
+        { id: `agent-local-${Date.now()}`, role: "agent", content },
       ]);
     },
     [setMessages],
@@ -628,32 +585,9 @@ function Chat({
     activeTurnRef.current = null;
     setUsage(null);
     setToolProgress(null);
-    setA2aLiveProgress(null);
     queueRef.current = [];
     setQueuedMessages([]);
   }, [isLoading, runId, hermesSessionId, setMessages, modelConfig.reload]);
-
-  useEffect(() => {
-    if (!isLoading) {
-      setA2aLiveProgress(null);
-      return;
-    }
-    let cancelled = false;
-    const poll = async (): Promise<void> => {
-      try {
-        const live = await window.hermesAPI.getA2aLiveProgress();
-        if (!cancelled) setA2aLiveProgress(live);
-      } catch {
-        if (!cancelled) setA2aLiveProgress(null);
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 400);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [isLoading]);
 
   const localCommands = useLocalCommands({
     profile,
@@ -855,27 +789,14 @@ function Chat({
         void handleSendRef.current(text, attachments, true);
         return;
       }
-
-      let payload = text;
-      if (preferredExpert) {
-        const target =
-          preferredExpert.service_id || preferredExpert.endpoint;
-        void window.hermesAPI.ensureAgentServiceRunningByEndpoint(target);
-        payload =
-          t("chat.expertsPreferHint", {
-            name: preferredExpert.name,
-            endpoint: preferredExpert.endpoint,
-          }) + text;
-      }
-
       if (isLoading) {
-        queueRef.current.push({ text: payload, attachments });
+        queueRef.current.push({ text, attachments });
         setQueuedMessages([...queueRef.current]);
         return;
       }
-      void handleSendRef.current(payload, attachments);
+      void handleSendRef.current(text, attachments);
     },
-    [isLoading, preferredExpert, t],
+    [isLoading],
   );
 
   const handleSuggestion = useCallback((text: string) => {
@@ -990,91 +911,11 @@ function Chat({
       }
     : null;
 
-  const prettyPrintHTML = (html: string): string => {
-    const formatNode = (node: Node, level: number = 0): string => {
-      const indent = "  ".repeat(level);
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.textContent?.trim();
-        return text ? `${indent}${text}\n` : "";
-      }
-      if (node.nodeType === Node.COMMENT_NODE) {
-        return `${indent}<!--${node.textContent}-->\n`;
-      }
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as Element;
-        const tagName = el.tagName.toLowerCase();
-        let attrs = "";
-        for (let i = 0; i < el.attributes.length; i++) {
-          const attr = el.attributes[i];
-          attrs += ` ${attr.name}="${attr.value}"`;
-        }
-        const isVoid = [
-          "area",
-          "base",
-          "br",
-          "col",
-          "embed",
-          "hr",
-          "img",
-          "input",
-          "link",
-          "meta",
-          "param",
-          "source",
-          "track",
-          "wbr",
-        ].includes(tagName);
-        if (isVoid) {
-          return `${indent}<${tagName}${attrs}>\n`;
-        }
-        if (
-          el.childNodes.length === 1 &&
-          el.firstChild?.nodeType === Node.TEXT_NODE
-        ) {
-          const text = el.firstChild.textContent?.trim();
-          return text
-            ? `${indent}<${tagName}${attrs}>${text}</${tagName}>\n`
-            : `${indent}<${tagName}${attrs}></${tagName}>\n`;
-        }
-        if (el.childNodes.length === 0) {
-          return `${indent}<${tagName}${attrs}></${tagName}>\n`;
-        }
-        let childrenHtml = "";
-        for (let i = 0; i < el.childNodes.length; i++) {
-          childrenHtml += formatNode(el.childNodes[i], level + 1);
-        }
-        return `${indent}<${tagName}${attrs}>\n${childrenHtml}${indent}</${tagName}>\n`;
-      }
-      return "";
-    };
-
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-      const body = doc.body;
-      if (body.childNodes.length > 0) {
-        let result = "";
-        for (let i = 0; i < body.childNodes.length; i++) {
-          result += formatNode(body.childNodes[i], 0);
-        }
-        return result.trim();
-      }
-    } catch (e) {
-      console.error("Failed to pretty print HTML", e);
-    }
-    return html;
-  };
-
   const handleInspectElement = useCallback(
-    (payload: {
-      tagName: string;
-      id: string;
-      className: string;
-      outerHTML: string;
-    }) => {
-      const formattedHtml = prettyPrintHTML(payload.outerHTML);
-      const formatted = `Here is the HTML for the \`<${payload.tagName}>\` component to debug:\n\`\`\`html\n${formattedHtml}\n\`\`\``;
-      chatInputRef.current?.appendText(formatted);
+    (payload: { selector: string; comment: string }) => {
+      chatInputRef.current?.appendText(
+        `Element: \`${payload.selector}\`\nComment: ${payload.comment}`,
+      );
     },
     [],
   );
@@ -1102,7 +943,6 @@ function Chat({
               onDeny={actions.handleDeny}
               onClarifyResolved={handleClarifyResolved}
               agentAvatar={agentAvatar}
-              a2aLiveProgress={a2aLiveProgress}
             />
           )}
           <div ref={bottomRef} />
@@ -1125,16 +965,6 @@ function Chat({
         <QueuedMessages
           messages={queuedMessages}
           onRemove={handleRemoveQueued}
-        />
-        <AvailableExpertsBar
-          preferredKey={preferredExpert?.key ?? null}
-          busyEndpoint={a2aLiveProgress?.endpoint || null}
-          busyPeer={a2aLiveProgress?.peer || null}
-          onPreferExpert={(expert) =>
-            setPreferredExpert((prev) =>
-              prev?.key === expert.key ? null : expert,
-            )
-          }
         />
         <ChatInput
           ref={chatInputRef}

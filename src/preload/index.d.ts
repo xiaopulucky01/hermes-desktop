@@ -269,6 +269,9 @@ interface HermesAPI {
     profile?: string,
   ) => Promise<{ success: boolean; error?: string }>;
   cancelOAuthLogin: () => Promise<boolean>;
+  getOAuthProviderStatuses: (
+    profile?: string,
+  ) => Promise<Record<string, boolean>>;
   onOAuthLoginProgress: (callback: (chunk: string) => void) => () => void;
 
   // Hermes account sign-in (device authorization grant)
@@ -419,6 +422,10 @@ interface HermesAPI {
     dockerContainerName: string,
   ) => Promise<import("../shared/ssh-docker").SshDockerProvisionResult>;
   testRemoteConnection: (url: string, apiKey?: string) => Promise<boolean>;
+  connectRemoteGateway: (
+    url: string,
+    apiKey?: string,
+  ) => Promise<{ connected: boolean; authMode: "token" | "oauth" }>;
   probeRemoteAuthMode: (
     url: string,
   ) => Promise<{ authMode: "token" | "oauth"; version: string | null }>;
@@ -548,6 +555,12 @@ interface HermesAPI {
   restartGateway: (profile?: string) => Promise<boolean>;
   gatewayStatus: () => Promise<boolean>;
   setNativeAppearance: (source: "dark" | "light" | "system") => Promise<void>;
+  getSpellCheckerInfo: () => Promise<{
+    available: string[];
+    selected: string[];
+    system: string[];
+  }>;
+  setSpellCheckerLanguages: (languages: string[]) => Promise<string[]>;
   dashboardStatus: (profile?: string) => Promise<DashboardStatus>;
   freshDashboardWsUrl: (profile?: string) => Promise<string>;
   startDashboard: (profile?: string) => Promise<DashboardStatus>;
@@ -1293,6 +1306,11 @@ interface HermesAPI {
 
   // Shell
   openExternal: (url: string) => Promise<void>;
+  inspectWebPreview: (webContentsId: number) => Promise<{
+    selector: string;
+    rect: { left: number; top: number; width: number; height: number };
+  } | null>;
+  cancelWebPreviewInspection: (webContentsId: number) => Promise<void>;
 
   // Backup / Import
   runHermesBackup: (

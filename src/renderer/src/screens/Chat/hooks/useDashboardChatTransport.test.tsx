@@ -178,6 +178,31 @@ describe("useDashboardChatTransport recovery", () => {
     expect(dashboardMock.connect).toHaveBeenCalledWith("ws://fresh-dashboard");
   });
 
+  it("does not request model.options twice when no model switch runs", async () => {
+    dashboardMock.request.mockImplementation(async (method) => {
+      if (method === "session.create") {
+        return { session_id: "live", stored_session_id: "stored" };
+      }
+      if (method === "model.options") {
+        return { model: "bad-model", provider: "bad-provider", providers: [] };
+      }
+      return {};
+    });
+    const api: HarnessApi = {};
+    render(<Harness api={api} />);
+
+    await act(async () => {
+      await api.send?.("first");
+      await api.send?.("second");
+    });
+
+    const methods = dashboardMock.request.mock.calls.map(([method]) => method);
+    expect(methods.filter((method) => method === "slash.exec")).toHaveLength(1);
+    expect(methods.filter((method) => method === "model.options")).toHaveLength(
+      3,
+    );
+  });
+
   it("surfaces OAuth login requirements without legacy fallback", async () => {
     // @lat: [[remote-dashboard-oauth#Test specifications#OAuth no-fallback]]
     const onUnavailable = vi.fn();

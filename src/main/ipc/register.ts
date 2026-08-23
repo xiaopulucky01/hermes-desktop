@@ -93,6 +93,7 @@ import {
   runHermesAuthLogin,
   cancelHermesAuthLogin,
   detectDeviceCode,
+  OAUTH_LOGIN_PROVIDERS,
 } from "../hermes-auth";
 import { startDeviceLogin, cancelDeviceLogin } from "../hermes-account";
 import {
@@ -193,6 +194,7 @@ import {
   getModelConfig,
   setModelConfig,
   getCredentialPool,
+  hasOAuthCredentials,
   setCredentialPool,
   addCredentialPoolEntry,
   getConnectionConfig,
@@ -254,6 +256,10 @@ import {
   remoteSetModelConfig,
   remoteUpdateModel,
 } from "../remote-models";
+import {
+  emptyOAuthProviderStatuses,
+  remoteGetOAuthProviderStatuses,
+} from "../remote-provider-statuses";
 import {
   listModels,
   addModel,
@@ -400,6 +406,7 @@ import {
   sshSetToolsetEnabled,
   sshSetMessagingPlatformToolsetEnabled,
   sshReadEnv,
+  sshGetOAuthProviderStatuses,
   sshSetEnvValue,
   sshGetConfigValue,
   sshSetConfigValue,
@@ -440,6 +447,10 @@ import {
   sshInspectHermesTarget,
   sshProvisionDockerTarget,
 } from "../ssh-docker";
+import {
+  cancelWebPreviewInspection,
+  inspectWebPreview,
+} from "../web-preview-inspector";
 
 export interface IpcContext {
   activeRuns: Map<string, () => void>;
@@ -879,6 +890,45 @@ export function registerIpcHandlers(context: IpcContext): void {
     );
   });
   ipcMain.handle("oauth-login-cancel", () => cancelHermesAuthLogin());
+  ipcMain.handle(
+    "get-oauth-provider-statuses",
+    async (_event, profile?: string): Promise<Record<string, boolean>> => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        return withRemoteDashboard(
+          conn,
+          () =>
+            remoteGetOAuthProviderStatuses(
+              conn,
+              OAUTH_LOGIN_PROVIDERS,
+              profile,
+            ),
+          () => emptyOAuthProviderStatuses(OAUTH_LOGIN_PROVIDERS),
+        );
+      }
+      if (conn.mode === "ssh" && conn.ssh) {
+        const sshProfile = activeSshProfile(profile);
+        return withSshDashboardSessions(
+          conn,
+          (config) =>
+            remoteGetOAuthProviderStatuses(config, OAUTH_LOGIN_PROVIDERS),
+          () =>
+            sshGetOAuthProviderStatuses(
+              conn.ssh,
+              OAUTH_LOGIN_PROVIDERS,
+              sshProfile,
+            ),
+          sshProfile,
+        );
+      }
+      return Object.fromEntries(
+        OAUTH_LOGIN_PROVIDERS.map((provider) => [
+          provider,
+          hasOAuthCredentials(provider, profile),
+        ]),
+      );
+    },
+  );
 
   // Hermes account sign-in — OAuth 2.0 Device Authorization Grant against the
   // Hermes backend. Streams progress to the renderer's modal, opens the browser
@@ -1345,9 +1395,45 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, url: string, apiKey?: string) => testRemoteConnection(url, apiKey),
   );
 
+  ipcMain.handle(
+    "connect-remote-gateway",
+    async (_event, remoteUrl: string, apiKey?: string) => {
+      const url = remoteUrl.trim();
+      if (!url) throw new Error("Enter a Remote gateway URL.");
+
+      const detected = await probeRemoteAuthMode(url, fetch, apiKey?.trim());
+      if (detected.authMode === "oauth") {
+        await openRemoteOAuthLogin(url, context.getMainWindow());
+      } else if (!(await testRemoteConnection(url, apiKey?.trim()))) {
+        return { connected: false, authMode: "token" as const };
+      }
+
+      const current = getConnectionConfig();
+      setConnectionConfig({
+        ...current,
+        mode: "remote",
+        remoteUrl: url,
+        remoteAuthMode: detected.authMode,
+        apiKey: resolveConnectionApiKeyUpdate(
+          current,
+          "remote",
+          url,
+          detected.authMode === "token" ? apiKey?.trim() : undefined,
+        ),
+      });
+      resetSshDashboardAvailability();
+      notifyConnectionConfigChanged();
+      return { connected: true, authMode: detected.authMode };
+    },
+  );
+
   ipcMain.handle("probe-remote-auth-mode", async (_event, url: string) => {
-    const result = await probeRemoteAuthMode(url);
     const conn = getConnectionConfig();
+    const storedKey =
+      conn.mode === "remote" && conn.remoteUrl.trim() === url.trim()
+        ? conn.apiKey
+        : "";
+    const result = await probeRemoteAuthMode(url, fetch, storedKey);
     if (
       conn.mode === "remote" &&
       conn.remoteUrl.trim() === url.trim() &&
@@ -1839,6 +1925,47 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (source === "dark" || source === "light" || source === "system") {
       nativeTheme.themeSource = source;
     }
+  });
+
+  ipcMain.handle("get-spell-checker-info", (event) => {
+    const spellcheckSession = event.sender.session;
+    const available = [...spellcheckSession.availableSpellCheckerLanguages];
+    const availableByLowercase = new Map(
+      available.map((language) => [language.toLowerCase(), language]),
+    );
+    const system: string[] = [];
+    for (const preferred of app.getPreferredSystemLanguages()) {
+      const normalized = preferred.toLowerCase();
+      const exact = availableByLowercase.get(normalized);
+      const base = normalized.split("-")[0];
+      const regional = available.find((language) =>
+        language.toLowerCase().startsWith(`${base}-`),
+      );
+      const match = exact || regional;
+      if (match && !system.includes(match)) system.push(match);
+    }
+    return {
+      available,
+      selected: spellcheckSession.getSpellCheckerLanguages(),
+      system,
+    };
+  });
+
+  ipcMain.handle("set-spell-checker-languages", (event, value: unknown) => {
+    const spellcheckSession = event.sender.session;
+    const available = new Set(spellcheckSession.availableSpellCheckerLanguages);
+    const languages = Array.isArray(value)
+      ? Array.from(
+          new Set(
+            value.filter(
+              (item): item is string =>
+                typeof item === "string" && available.has(item),
+            ),
+          ),
+        )
+      : [];
+    spellcheckSession.setSpellCheckerLanguages(languages);
+    return languages;
   });
 
   // Dashboard/WebSocket transport probe. This is intentionally separate from
@@ -3156,6 +3283,14 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("open-external", (_event, url: string) => {
     openExternalUrl(url);
   });
+  ipcMain.handle("web-preview-inspect", (event, webContentsId: unknown) =>
+    inspectWebPreview(event, webContentsId, getMainWindow),
+  );
+  ipcMain.handle(
+    "web-preview-cancel-inspection",
+    (event, webContentsId: unknown) =>
+      cancelWebPreviewInspection(event, webContentsId, getMainWindow),
+  );
 
   // Backup / Import
   ipcMain.handle("run-hermes-backup", (_event, profile?: string) =>

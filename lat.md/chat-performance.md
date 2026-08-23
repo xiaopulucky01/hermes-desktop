@@ -12,11 +12,11 @@ The rule lives on `.chat-message` in the renderer stylesheet (`src/renderer/src/
 
 The `auto` keyword in `contain-intrinsic-size` makes the browser remember each row's real measured height after it renders once, so the scrollbar and scroll position stay accurate; the `120px` is only the first-paint estimate for never-yet-rendered rows.
 
-### Paint containment and the bubble timestamp
+### Paint containment and the hover timestamp
 
-`content-visibility` implies paint containment, which clips anything drawn outside the row's box.
+`content-visibility` implies paint containment, which clips anything drawn outside the row's box — including the hover timestamp that sits below the bubble.
 
-The timestamp (`.chat-bubble-time`) sits just below the bubble, absolutely positioned to the right edge of a shrink-wrapped `.chat-bubble-stack`, so it never widens short bubbles and stays inside the row via `.chat-message` `padding-bottom`.
+The timestamp (`.chat-bubble-time`) used to overflow ~15px below the bubble and would be clipped. It now sits at `bottom: 1px` inside the row's `padding-bottom: 16px`, so it stays visible while still appearing just under the bubble.
 
 ### Fullscreen overlays inside rows must portal to body
 
@@ -32,7 +32,7 @@ The scroll container `.chat-messages` is block flow, not a flex column. A flex c
 
 A correct `scrollHeight` matters because [[src/renderer/src/screens/Chat/hooks/useChatScroll.ts#useChatScroll]] uses `scrollHeight - scrollTop - clientHeight` to decide whether the view is pinned to the bottom; a wrong value would break auto-scroll.
 
-The flex `gap` that previously spaced rows is replaced by per-row spacing: `.chat-message` carries `padding-bottom: 16px`, and non-message children that lack it (`.chat-clarify`) carry an equivalent `margin-bottom`. Block flow also moves alignment from `align-self` to `margin-left: auto` for user rows, and the empty state fills height with `min-height: 100%` instead of `flex: 1`.
+The flex `gap` that previously spaced rows is replaced by per-row spacing: `.chat-message` carries `padding-bottom: 16px` (which also provides the timestamp's room), and non-message children that lack it (`.chat-clarify`) carry an equivalent `margin-bottom`. Block flow also moves alignment from `align-self` to `margin-left: auto` for user rows, and the empty state fills height with `min-height: 100%` instead of `flex: 1`.
 
 ## Textarea auto-resize avoids per-keystroke reflow
 
@@ -52,8 +52,10 @@ Arrow-key selection does not query or measure command DOM nodes. [[src/renderer/
 
 The searchable name and description are normalized once when the command catalog changes rather than once per command on every keystroke. The virtual canvas uses layout and paint containment, and the modal overlay avoids backdrop blur so opening the palette does not trigger a full-window blur pass.
 
-## Streaming auto-scroll stays instant
+## Table-heavy transcript heap profile
 
-While the assistant is streaming, each token chunk updates the last bubble and retriggers [[src/renderer/src/screens/Chat/hooks/useChatScroll.ts#useChatScroll]]. Smooth `scrollIntoView` on every chunk stacks competing scroll animations and makes the transcript visibly jitter.
+Renderer memory changes require real Chromium heap evidence before a retention fix is attempted; long transcripts legitimately retain their mounted DOM.
 
-`useChatScroll` therefore snaps with `container.scrollTop = scrollHeight` for routine updates (streaming chunks, reasoning rows, tool activity) and reserves `behavior: "smooth"` only when the user just sent a message — the one case where a short eased scroll feels intentional.
+Issue #883 was profiled with production `MessageRow`/`AgentMarkdown` rendering and heap snapshots at baseline, 5 table-heavy turns, 50 turns, and after unmount. Used heap rose from 2.50 MB to 6.68 MB while 17,169 transcript nodes were live, then fell to 4.05 MB and 19 nodes after unmount. Detached-node count stayed flat at five after content was mounted and after unmount, so the run did not reproduce a detached DOM leak; the growth was live transcript DOM.
+
+The profile did expose a redundant network request rather than retained objects. [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.ts#useDashboardChatTransport]] now reuses the first `model.options` response when no slash command changed model state, while retaining the second read after `slash.exec` because commands can mutate the active model. [[src/renderer/src/screens/Chat/hooks/useDashboardChatTransport.test.tsx]] protects the one-read path.
